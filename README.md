@@ -1,4 +1,4 @@
-# Ledgerly
+# Ledgerly (Work In Progress)
 
 A double-entry ledger with a wallet-style interface, built in Go to
 demonstrate correctness under concurrency, idempotent request handling,
@@ -50,16 +50,6 @@ shared Redis store rather than per-instance memory. Concurrency
 correctness (e.g., two transfers hitting the same account at once) is
 handled with optimistic concurrency / row-level locking in Postgres —
 not by the message broker or any in-memory coordination.
-
-### Why RabbitMQ, not Kafka
-
-RabbitMQ is sized correctly for this project's actual traffic and fits
-its transactional, task-queue-style event flow well. Kafka is the
-right tool for high-throughput event streaming at real fintech scale
-(transaction logs, audit trails, fraud pipelines) — but reaching for it
-here, on a small demo, would be a mismatch between tool and problem
-size. See **Scaling Roadmap** below for how this would evolve if
-traffic demanded it.
 
 ## Running Locally
 
