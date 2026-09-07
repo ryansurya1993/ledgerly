@@ -1,0 +1,5 @@
+PROJECT_BRIEF.md
+.env
+*.log
+/bin/
+/tmp/
