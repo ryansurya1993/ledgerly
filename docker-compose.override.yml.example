@@ -1,11 +1,14 @@
 # Copy this file to docker-compose.override.yml (gitignored -- see
-# .gitignore) to publish Postgres and Redis ports directly to your
-# host, e.g. to run `psql`/`redis-cli` from outside Docker.
+# .gitignore) to publish Postgres, Redis, and RabbitMQ ports directly
+# to your host, e.g. to run `psql`/`redis-cli` from outside Docker, or
+# open RabbitMQ's management UI at http://localhost:15672 (login with
+# RABBITMQ_USER/RABBITMQ_PASSWORD -- see .env.example; defaults to
+# ledgerly/devsecret_rabbitmq).
 #
-# Not needed to run the stack: ledger-service and wallet-service
-# already reach both over the internal `ledgerly` network by service
-# name, with no published port involved at all. See docker-compose.yml's
-# own comment for why these aren't published by default.
+# Not needed to run the stack: every service already reaches all three
+# over the internal `ledgerly` network by service name, with no
+# published port involved at all. See docker-compose.yml's own comment
+# for why these aren't published by default.
 #
 # Compose merges docker-compose.override.yml into docker-compose.yml
 # automatically on `docker-compose up` -- no `-f` flag needed.
@@ -18,3 +21,8 @@ services:
   redis:
     ports:
       - "6379:6379"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"

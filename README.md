@@ -64,38 +64,43 @@ docker-compose up
 (or `docker compose up` — either the standalone tool or the Docker CLI
 plugin works with the `docker-compose.yml` in this repo.)
 
-This brings up the full stack currently built: Postgres and Redis, plus
-`ledger-service` (http://localhost:8080) and `wallet-service`
-(http://localhost:8081), each built from its own `Dockerfile`.
-`wallet-service` won't start until `ledger-service` reports healthy,
-and `ledger-service` won't start until Postgres reports healthy — real
-health-check conditions in `docker-compose.yml`, not just container-started
-ordering. No manual setup step is required first: `ledger-service`
-provisions its own restricted database role's password on every
-startup (see `ledger-service/README.md`'s "First-time setup" for why
-that's not just baked into a migration file).
+This brings up the full stack currently built: Postgres, Redis, and
+RabbitMQ, plus `ledger-service` (http://localhost:8080),
+`wallet-service` (http://localhost:8081), and `notification-service`
+(http://localhost:8082 — `GET /events` is a live Server-Sent Events
+feed of every transaction as it posts; try `curl -N
+localhost:8082/events` in one terminal while you top up or transfer in
+another), each built from its own `Dockerfile`. Startup is
+dependency-ordered by real health-check conditions in
+`docker-compose.yml`, not just container-started ordering:
+`wallet-service` waits on `ledger-service`, and both `ledger-service`
+and `notification-service` wait on RabbitMQ, all waiting on their
+respective dependencies reporting genuinely healthy. No manual setup
+step is required first: `ledger-service` provisions its own restricted
+database role's password on every startup (see
+`ledger-service/README.md`'s "First-time setup" for why that's not
+just baked into a migration file).
 
-**Not part of the stack yet:** `notification-service` and RabbitMQ —
-neither is built yet (see Architecture above) — nor PgBouncer. Each
-service's own README has its full setup, environment variables, and
-API docs.
+**Not part of the stack yet:** PgBouncer (see Architecture above).
+Each service's own README has its full setup, environment variables,
+and API docs.
 
-**Postgres and Redis aren't reachable directly from your host by
-default** — only `ledger-service` and `wallet-service`'s ports are
+**Postgres, Redis, and RabbitMQ aren't reachable directly from your
+host by default** — only the three application services' ports are
 published, matching what a production setup would actually expose.
-`ledger-service`/`wallet-service` still reach both over Compose's
-internal network regardless. To poke at either directly for debugging:
+Every service still reaches all three over Compose's internal network
+regardless. To poke at any of them directly for debugging:
 
 ```bash
 docker compose exec postgres psql -U postgres -d ledgerly
 docker compose exec redis redis-cli
 ```
 
-Or, to get a real host-published port back (e.g. to point a GUI client
-at Postgres), copy `docker-compose.override.yml.example` to
-`docker-compose.override.yml` (gitignored, loaded automatically) — see
-that file and `docker-compose.yml`'s own comment for why it isn't the
-default.
+Or, to get real host-published ports back (e.g. to point a GUI client
+at Postgres, or open RabbitMQ's management UI), copy
+`docker-compose.override.yml.example` to `docker-compose.override.yml`
+(gitignored, loaded automatically) — see that file and
+`docker-compose.yml`'s own comment for why it isn't the default.
 
 ### Prove it scales yourself (roadmap)
 
@@ -125,6 +130,17 @@ request.
 This project intentionally uses the smallest tool that fits its current
 scope. Here's how it would evolve to handle real fintech-scale traffic:
 
+- **Best-effort event publishing → transactional outbox.**
+  `ledger-service` currently publishes `transaction.posted` events
+  best-effort, after its own database transaction commits — see its
+  README's "Events" section — because `notification-service`'s live
+  feed is a nice-to-have view, not something anything else depends on
+  for correctness. If a future consumer of these events needs
+  at-least-once delivery (e.g. audit logging, fraud detection, billing)
+  that's the signal to add an outbox table written in the same
+  transaction as the ledger entries, plus a relay process that retries
+  until RabbitMQ confirms receipt — not to retrofit stronger guarantees
+  onto the activity feed's existing best-effort path.
 - **RabbitMQ → Kafka.** As transaction volume and the number of
   downstream event consumers (audit logs, fraud detection, analytics)
   grow, Kafka's log-based retention and higher sustained throughput
