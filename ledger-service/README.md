@@ -4,6 +4,39 @@ Core double-entry ledger: accounts, transactions, balance calculation,
 integrity checks. Owns all financial state in Postgres. See the root
 `README.md` and `CLAUDE.md` for the overall Ledgerly architecture.
 
+## First-time setup
+
+**Before this service can connect to a fresh Postgres database, you
+must set a password for the `ledger_app` role by hand.** Skip this and
+the service fails on startup with `password authentication failed for
+user ledger_app`.
+
+This is by design, not a bug: migration `000002_restrict_app_role.up.sql`
+creates `ledger_app` with **no password**. A migration file is
+version-controlled and readable by anyone with repo access, so a real
+credential can never live in it — the role is created unable to
+authenticate at all, and stays that way until you set a password
+out-of-band from a secret that's never committed.
+
+1. Apply migrations against the fresh database (running the service
+   once is enough — it applies pending migrations on startup before
+   attempting to connect as `ledger_app`; that connection attempt is
+   expected to fail the first time).
+2. Set the password directly against the running Postgres container:
+
+   ```bash
+   docker exec -it <postgres-container-name> psql -U postgres -d ledgerly \
+     -c "ALTER ROLE ledger_app WITH PASSWORD '<password>';"
+   ```
+
+   Find `<postgres-container-name>` with `docker ps` if you don't
+   already know it; choose any value for `<password>`.
+3. Set `LEDGER_APP_DB_PASSWORD` in your environment to that same value
+   and (re)start the service. Every run after this succeeds.
+
+See "Database roles" below for why the two roles are split this way,
+and for the production (k3s) equivalent of this step.
+
 ## Database roles
 
 Two distinct Postgres roles are involved, and the service must only
@@ -23,22 +56,17 @@ up the "never delete or mutate a posted ledger entry" rule in
 
 ### Setting `ledger_app`'s password
 
-Migration `000002_restrict_app_role.up.sql` creates the role with no
-password — a migration file is version-controlled and readable by
-anyone with repo access, so a real credential can never live in it.
-Until a password is set, `ledger_app` cannot authenticate at all, which
-is intentional: it means no environment can be left with a guessable
-default credential.
-
-Set it once per environment, from a secret that is never committed:
+See "First-time setup" above for the local-dev command. In short: the
+password is set once per environment, from a secret that is never
+committed:
 
 ```sql
 ALTER ROLE ledger_app WITH PASSWORD '<value from your secret store>';
 ```
 
-- **Local dev (docker-compose):** run the above via `psql` against the
-  local Postgres container after migrations apply, using a value from
-  your `.env` file (which is gitignored).
+- **Local dev:** the `docker exec ... psql ...` command in "First-time
+  setup" above, using a value from your `.env` file (gitignored) once
+  one exists.
 - **Production (k3s):** store the password in a Kubernetes `Secret` and
   either run the `ALTER ROLE` as a one-off job when provisioning the
   database, or template it into an init job. Never put it in a
@@ -97,13 +125,10 @@ status (`200` if Postgres answers, `503` if it doesn't) — so a load
 balancer or orchestrator can tell a replica that's lost its database
 connection from one that's actually healthy.
 
-**First boot against a brand-new database:** migrations create the
-`ledger_app` role with no password (see above), so step 2 will fail
-authentication the very first time, by design — nothing can serve
-traffic with a guessable default credential. Set the password once
-(`ALTER ROLE ledger_app WITH PASSWORD '...'`) and start the service
-again; every run after that succeeds, and re-running migrations against
-an already-migrated database is a safe no-op.
+**First boot against a brand-new database:** step 2 fails authentication
+the very first time — see "First-time setup" at the top of this file.
+Re-running migrations against an already-migrated database is a safe
+no-op, so once the password is set every subsequent run just works.
 
 ## API
 

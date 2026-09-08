@@ -149,17 +149,25 @@ func startTestPostgres(ctx context.Context) (*pgxpool.Pool, func(), error) {
 // container's 5432 to (we bind to port 0 / an empty host port above so
 // concurrent test runs, or a developer's own local Postgres on 5432,
 // can never collide with this container).
+// Immediately after `docker run -d` returns, the port mapping is
+// occasionally not yet queryable, so this retries briefly rather than
+// failing on the first attempt.
 func containerHostPort(containerID string) (string, error) {
-	out, err := exec.Command("docker", "port", containerID, "5432/tcp").Output()
-	if err != nil {
-		return "", fmt.Errorf("docker port: %w", err)
+	var lastErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		out, err := exec.Command("docker", "port", containerID, "5432/tcp").Output()
+		if err == nil {
+			line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+			_, port, err := net.SplitHostPort(line)
+			if err != nil {
+				return "", fmt.Errorf("parse docker port output %q: %w", line, err)
+			}
+			return port, nil
+		}
+		lastErr = err
+		time.Sleep(200 * time.Millisecond)
 	}
-	line := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
-	_, port, err := net.SplitHostPort(line)
-	if err != nil {
-		return "", fmt.Errorf("parse docker port output %q: %w", line, err)
-	}
-	return port, nil
+	return "", fmt.Errorf("docker port: %w", lastErr)
 }
 
 // waitForPostgres retries connecting until Postgres inside the

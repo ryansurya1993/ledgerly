@@ -22,6 +22,10 @@ attempt to overdraft an account, fire concurrent transfers at the same
 account, replay a transaction to test idempotency, and watch a live
 integrity check confirm the books always balance.
 
+Each service has its own README.md with setup instructions, API docs,
+and first-time configuration steps (e.g. setting up database roles).
+Please read each service's README before running it.
+
 ## Architecture
 
 Three services, kept intentionally small in number so each one is done
