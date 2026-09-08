@@ -6,36 +6,29 @@ integrity checks. Owns all financial state in Postgres. See the root
 
 ## First-time setup
 
-**Before this service can connect to a fresh Postgres database, you
-must set a password for the `ledger_app` role by hand.** Skip this and
-the service fails on startup with `password authentication failed for
-user ledger_app`.
+Set `LEDGER_APP_DB_PASSWORD` and `LEDGER_MIGRATE_DB_PASSWORD` in your
+environment (see the table under "Environment variables" below), then
+just start the service:
 
-This is by design, not a bug: migration `000002_restrict_app_role.up.sql`
-creates `ledger_app` with **no password**. A migration file is
-version-controlled and readable by anyone with repo access, so a real
-credential can never live in it — the role is created unable to
-authenticate at all, and stays that way until you set a password
-out-of-band from a secret that's never committed.
+```bash
+go run ./cmd/ledger-service
+```
 
-1. Apply migrations against the fresh database (running the service
-   once is enough — it applies pending migrations on startup before
-   attempting to connect as `ledger_app`; that connection attempt is
-   expected to fail the first time).
-2. Set the password directly against the running Postgres container:
+That's the whole setup. Nothing else needs to run by hand, and nothing
+needs to run against Postgres out-of-band first.
 
-   ```bash
-   docker exec -it <postgres-container-name> psql -U postgres -d ledgerly \
-     -c "ALTER ROLE ledger_app WITH PASSWORD '<password>';"
-   ```
-
-   Find `<postgres-container-name>` with `docker ps` if you don't
-   already know it; choose any value for `<password>`.
-3. Set `LEDGER_APP_DB_PASSWORD` in your environment to that same value
-   and (re)start the service. Every run after this succeeds.
-
-See "Database roles" below for why the two roles are split this way,
-and for the production (k3s) equivalent of this step.
+**Why this isn't a manual step:** migration `000002_restrict_app_role.up.sql`
+creates the `ledger_app` role with **no password** — a migration file
+is version-controlled and readable by anyone with repo access, so a
+real credential can never live in one. Rather than requiring an
+operator to remember to run `ALTER ROLE ledger_app WITH PASSWORD ...`
+by hand in every environment (which is exactly what bit us the first
+time this service ran against a fresh database), `cmd/ledger-service`
+sets that password itself on every startup, from
+`LEDGER_APP_DB_PASSWORD`, right after applying migrations —
+see `internal/db.ProvisionAppRolePassword`. The credential still only
+ever comes from the environment, never from a `.sql` file; the only
+thing that changed is *who* runs the `ALTER ROLE`.
 
 ## Database roles
 
@@ -56,21 +49,18 @@ up the "never delete or mutate a posted ledger entry" rule in
 
 ### Setting `ledger_app`'s password
 
-See "First-time setup" above for the local-dev command. In short: the
-password is set once per environment, from a secret that is never
-committed:
+Handled automatically — see "First-time setup" above. The service runs
+`ALTER ROLE ledger_app WITH PASSWORD ...` itself on every startup,
+using the same admin/owner connection `RunMigrations` already needs,
+sourced from `LEDGER_APP_DB_PASSWORD`. This is idempotent, so it's just
+as safe to run on the 100th startup as the first.
 
-```sql
-ALTER ROLE ledger_app WITH PASSWORD '<value from your secret store>';
-```
-
-- **Local dev:** the `docker exec ... psql ...` command in "First-time
-  setup" above, using a value from your `.env` file (gitignored) once
-  one exists.
-- **Production (k3s):** store the password in a Kubernetes `Secret` and
-  either run the `ALTER ROLE` as a one-off job when provisioning the
-  database, or template it into an init job. Never put it in a
-  ConfigMap or a manifest checked into git.
+- **Local dev / docker-compose:** set `LEDGER_APP_DB_PASSWORD` and
+  `LEDGER_MIGRATE_DB_PASSWORD` in the environment (see the root
+  `docker-compose.yml`) — no separate step required.
+- **Production (k3s):** store both passwords in a Kubernetes `Secret`
+  and inject them as environment variables on the Pod. Never put them
+  in a ConfigMap or a manifest checked into git.
 
 ### Environment variables
 
@@ -84,7 +74,7 @@ the credentials differ. All are read by `internal/db.LoadConfig()`.
 | `LEDGER_DB_NAME` | `ledgerly` | |
 | `LEDGER_DB_SSLMODE` | `disable` | set to `require` (or stricter) in production |
 | `LEDGER_APP_DB_USER` | `ledger_app` | the restricted runtime role |
-| `LEDGER_APP_DB_PASSWORD` | *(required, no default)* | set via `ALTER ROLE` above |
+| `LEDGER_APP_DB_PASSWORD` | *(required, no default)* | the service sets this as `ledger_app`'s Postgres password on every startup — see "First-time setup" |
 | `LEDGER_MIGRATE_DB_USER` | `postgres` | the admin/owner role used only for migrations |
 | `LEDGER_MIGRATE_DB_PASSWORD` | *(required, no default)* | |
 
@@ -119,16 +109,16 @@ go run ./cmd/ledger-service
 ```
 
 On every startup the service: 1) applies any pending migrations using
-the admin role, then 2) opens its runtime pool as `ledger_app` and pings
-it before serving traffic. `GET /health` reflects that pool's real
-status (`200` if Postgres answers, `503` if it doesn't) — so a load
-balancer or orchestrator can tell a replica that's lost its database
-connection from one that's actually healthy.
-
-**First boot against a brand-new database:** step 2 fails authentication
-the very first time — see "First-time setup" at the top of this file.
-Re-running migrations against an already-migrated database is a safe
-no-op, so once the password is set every subsequent run just works.
+the admin role, 2) sets `ledger_app`'s password from
+`LEDGER_APP_DB_PASSWORD` using that same admin connection (see
+"First-time setup" above), then 3) opens its runtime pool as
+`ledger_app` and pings it before serving traffic. `GET /health`
+reflects that pool's real status (`200` if Postgres answers, `503` if
+it doesn't) — so a load balancer or orchestrator can tell a replica
+that's lost its database connection from one that's actually healthy.
+Re-running migrations (and re-setting the password) against an
+already-provisioned database is a safe no-op, so this works
+unchanged on every subsequent restart, not just the first.
 
 ## API
 
@@ -315,3 +305,60 @@ server-side only, never echoed to the client):
 | `409 Conflict` | `ledger.ErrInsufficientFunds` — the request is well-formed, but applying it would drive a wallet negative |
 | `503 Service Unavailable` | `ledger.ErrMaxRetriesExceeded` — the optimistic-concurrency retry loop in `PostTransaction` ran out of attempts on one of this transaction's accounts; transient, safe to retry |
 | `500 Internal Server Error` | Anything else (a real database/connectivity problem) |
+
+## Events (RabbitMQ)
+
+Every genuinely new (non-replayed) `POST /transactions` commit publishes
+a `transaction.posted` event to RabbitMQ, for `notification-service`'s
+live activity feed — see its README for the consumer side and the
+full event shape.
+
+### Delivery guarantee: best-effort, not exactly-once
+
+This is deliberately **not** a transactional outbox. An outbox would
+write the event to a table in the *same* Postgres transaction as the
+ledger entries, then a separate relay process would publish it with
+retries until it succeeds — guaranteeing the event is eventually
+published even across a crash. Instead, `internal/ledger.PostTransaction`
+publishes synchronously, best-effort, right after its Postgres
+transaction has already committed: on success, RabbitMQ gets the
+event; if publishing fails (RabbitMQ unreachable, connection dropped
+mid-flight, whatever), the failure is logged and swallowed —
+**the request still succeeds**, and the write it describes is already
+durable in Postgres regardless.
+
+This tradeoff is a direct consequence of what `notification-service`
+is for: a live activity feed is a nice-to-have view onto state Postgres
+already owns authoritatively (`GET /accounts/{id}/history`, `GET
+/accounts/{id}/balance`, and `/integrity` are always the real answer),
+not a system anything else depends on for correctness. Building outbox
+machinery — an extra table, a relay process, dedup on the consumer
+side — to protect a view nobody relies on for correctness would be
+exactly the kind of over-engineering `CLAUDE.md`'s "smallest tool that
+fits current scope" guidance warns against. See
+`internal/ledger/events.go`'s doc comment for the full reasoning, and
+the root README's Scaling Roadmap for what would justify revisiting
+this.
+
+The one thing this guarantees: a dropped event means the live feed
+missed one update, and *only* that — never a lost, duplicated, or
+corrupted ledger entry. Concretely, the only way an event is dropped is
+a crash or RabbitMQ outage in the narrow window between this
+transaction's commit and the publish call a few lines later; anything
+that fails *before* commit (including RabbitMQ being unreachable for
+the entire request) never touches the ledger at all.
+
+### Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `LEDGER_RABBITMQ_URL` | `amqp://guest:guest@localhost:5672/` | Full AMQP URI. Unlike the Postgres passwords above, this is never required — see `internal/events.Config`. |
+
+### Topology
+
+`internal/events.Publisher` declares (idempotently — safe regardless of
+which service starts first) a durable topic exchange, `ledger.events`,
+and publishes each event under the routing key `transaction.posted`.
+It does not declare a queue: that's `notification-service`'s job, and
+deliberately so — see its README for why (a queue per consumer, not one
+shared queue, is what makes this a broadcast rather than a work queue).

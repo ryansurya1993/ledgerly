@@ -84,6 +84,13 @@ const (
 // would store a hash of the request alongside the key and reject a
 // mismatch.
 //
+// # Events
+//
+// A genuinely new (non-replayed) commit triggers a best-effort
+// notification to l.publisher, for notification-service's live
+// activity feed -- see events.go's doc comment for why this is
+// fire-and-forget after commit rather than part of this transaction.
+//
 // # Concurrency: what happens when two transfers hit the same account
 //
 // accounts.balance is a cache (see migration 000001); accounts.version
@@ -173,6 +180,9 @@ func (l *Ledger) PostTransaction(ctx context.Context, p PostTransactionParams) (
 			return PostTransactionResult{}, err
 		}
 		if !conflict {
+			if !result.Replayed {
+				l.publishTransactionPosted(ctx, result.Transaction, result.Entries)
+			}
 			return result, nil
 		}
 
