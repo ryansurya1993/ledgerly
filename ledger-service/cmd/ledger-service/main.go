@@ -21,11 +21,12 @@ func main() {
 	startupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Migrations run first, over a connection authenticated as the
-	// admin/owner role (Config.MigrateURL) -- never the role the
-	// service serves requests with.
-	if err := db.RunMigrations(cfg); err != nil {
-		log.Fatalf("run migrations: %v", err)
+	// Migrates the schema and sets ledger_app's password, in that order
+	// -- see db.InitializeDatabase's doc comment for why this is a
+	// single call rather than two separate ones main.go could
+	// accidentally reorder.
+	if err := db.InitializeDatabase(startupCtx, cfg); err != nil {
+		log.Fatalf("initialize database: %v", err)
 	}
 
 	// The pool the service actually queries through, authenticated as
