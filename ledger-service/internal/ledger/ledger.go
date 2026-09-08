@@ -97,6 +97,24 @@ func (l *Ledger) GetBalance(ctx context.Context, accountID uuid.UUID) (int64, er
 	return balance, nil
 }
 
+// AccountExists reports whether an account with the given ID exists. It's
+// a minimal existence check, separate from GetBalance, for callers that
+// only need a yes/no answer and shouldn't have to fetch (and discard) a
+// full balance to get one -- e.g. disambiguating "account has no
+// history yet" from "account doesn't exist" (GetHistory's caller in
+// internal/handler), or guarding CheckAccountIntegrity below. Extracted
+// here specifically so both call sites share one implementation instead
+// of each re-deriving "does this account exist" from a query written
+// for a different purpose (see CLAUDE.md's "Code reuse" rule).
+func (l *Ledger) AccountExists(ctx context.Context, accountID uuid.UUID) (bool, error) {
+	var exists bool
+	err := l.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE id = $1)`, accountID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check account existence: %w", err)
+	}
+	return exists, nil
+}
+
 // GetHistory returns every ledger entry posted against accountID, in
 // chronological order (oldest first). created_at is the primary sort
 // key; id is a tiebreaker for entries that land in the same instant

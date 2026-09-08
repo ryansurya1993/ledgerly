@@ -9,6 +9,7 @@ import (
 
 	"github.com/ryansurya1993/ledgerly/ledger-service/internal/db"
 	"github.com/ryansurya1993/ledgerly/ledger-service/internal/handler"
+	"github.com/ryansurya1993/ledgerly/ledger-service/internal/ledger"
 )
 
 func main() {
@@ -37,6 +38,8 @@ func main() {
 	}
 	defer pool.Close()
 
+	ledgerSvc := ledger.New(pool)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -44,6 +47,12 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handler.Health(pool))
+	mux.HandleFunc("POST /accounts", handler.CreateAccount(ledgerSvc))
+	mux.HandleFunc("GET /accounts/{id}/balance", handler.GetBalance(ledgerSvc))
+	mux.HandleFunc("GET /accounts/{id}/history", handler.GetHistory(ledgerSvc))
+	mux.HandleFunc("GET /accounts/{id}/integrity", handler.GetAccountIntegrity(ledgerSvc))
+	mux.HandleFunc("POST /transactions", handler.PostTransaction(ledgerSvc))
+	mux.HandleFunc("GET /integrity", handler.GetAllIntegrity(ledgerSvc))
 
 	srv := &http.Server{
 		Addr:              ":" + port,

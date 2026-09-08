@@ -36,16 +36,28 @@ func (r IntegrityResult) Drifted() bool {
 
 // CheckAccountIntegrity recomputes accountID's balance directly from
 // ledger_entries and compares it to the cached accounts.balance value.
-// It runs both reads in one Postgres transaction at the default READ
-// COMMITTED isolation level so they see a single consistent snapshot --
-// without that, a concurrent PostTransaction call landing between the
-// two SELECTs could make an already-consistent account look drifted
-// (e.g. the cached balance read reflects a transfer that the
-// ledger_entries read, taken a moment later, already includes twice, or
-// not yet). The transaction is read-only and rolled back, never
-// committed -- it exists purely to pin a snapshot for these two reads,
-// not to modify anything.
+// It checks the account exists (via AccountExists) before opening a
+// transaction to compute anything -- a nonexistent account should
+// report ErrAccountNotFound, not a meaningless zeroed/empty result.
+//
+// The balance reads themselves run in one Postgres transaction at the
+// default READ COMMITTED isolation level so they see a single
+// consistent snapshot -- without that, a concurrent PostTransaction
+// call landing between the two SELECTs could make an already-consistent
+// account look drifted (e.g. the cached balance read reflects a
+// transfer that the ledger_entries read, taken a moment later, already
+// includes twice, or not yet). The transaction is read-only and rolled
+// back, never committed -- it exists purely to pin a snapshot for these
+// two reads, not to modify anything.
 func (l *Ledger) CheckAccountIntegrity(ctx context.Context, accountID uuid.UUID) (IntegrityResult, error) {
+	exists, err := l.AccountExists(ctx, accountID)
+	if err != nil {
+		return IntegrityResult{}, err
+	}
+	if !exists {
+		return IntegrityResult{}, fmt.Errorf("%w: %s", ErrAccountNotFound, accountID)
+	}
+
 	tx, err := l.db.Begin(ctx)
 	if err != nil {
 		return IntegrityResult{}, fmt.Errorf("begin transaction: %w", err)
@@ -56,6 +68,11 @@ func (l *Ledger) CheckAccountIntegrity(ctx context.Context, accountID uuid.UUID)
 
 	err = tx.QueryRow(ctx, `SELECT balance FROM accounts WHERE id = $1`, accountID).Scan(&result.CachedBalance)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// The account existed a moment ago (AccountExists above) but is
+		// gone by the time this transaction reads it. Accounts are
+		// never deleted in this system (no DELETE grant -- see
+		// migration 000002), so this should be unreachable in practice;
+		// kept as a safety net rather than assumed away.
 		return IntegrityResult{}, fmt.Errorf("%w: %s", ErrAccountNotFound, accountID)
 	}
 	if err != nil {

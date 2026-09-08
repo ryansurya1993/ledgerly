@@ -44,6 +44,16 @@ Redis, RabbitMQ.
 - Write tests alongside new logic, especially concurrency tests for
   anything touching account balances.
 
+## Code reuse
+
+Before adding new logic, check `internal/ledger` and `internal/handler`
+for existing functions that already do what's needed (e.g. account
+existence checks, balance lookups) and reuse or extract them into a
+shared function rather than duplicating logic across call sites. If a
+new feature needs logic similar to something that already exists
+elsewhere in the codebase, extract the shared piece into its own
+function first, then build the new feature on top of it.
+
 ## Important Commands
 
 - `docker-compose up` — run all services locally (single instance each)

@@ -387,6 +387,37 @@ func TestConcurrentTransfersOppositeDirections(t *testing.T) {
 	}
 }
 
+func TestAccountExists(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+
+	a := mustCreateWallet(t, l, "TestAccountExists")
+
+	exists, err := l.AccountExists(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("AccountExists(existing): %v", err)
+	}
+	if !exists {
+		t.Errorf("AccountExists(existing) = false, want true")
+	}
+
+	exists, err = l.AccountExists(ctx, uuid.New())
+	if err != nil {
+		t.Fatalf("AccountExists(unknown): %v", err)
+	}
+	if exists {
+		t.Errorf("AccountExists(unknown) = true, want false")
+	}
+}
+
+func TestCheckAccountIntegrity_UnknownAccount(t *testing.T) {
+	l := newTestLedger(t)
+	_, err := l.CheckAccountIntegrity(context.Background(), uuid.New())
+	if !errors.Is(err, ErrAccountNotFound) {
+		t.Fatalf("CheckAccountIntegrity(unknown) = %v, want ErrAccountNotFound", err)
+	}
+}
+
 func TestCheckAllAccountsIntegrity(t *testing.T) {
 	l := newTestLedger(t)
 	ctx := context.Background()
