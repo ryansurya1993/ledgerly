@@ -61,14 +61,50 @@ not by the message broker or any in-memory coordination.
 docker-compose up
 ```
 
-Runs one instance of each service, backed by Postgres, Redis, and
-RabbitMQ.
+(or `docker compose up` — either the standalone tool or the Docker CLI
+plugin works with the `docker-compose.yml` in this repo.)
 
-### Prove it scales yourself
+This brings up the full stack currently built: Postgres and Redis, plus
+`ledger-service` (http://localhost:8080) and `wallet-service`
+(http://localhost:8081), each built from its own `Dockerfile`.
+`wallet-service` won't start until `ledger-service` reports healthy,
+and `ledger-service` won't start until Postgres reports healthy — real
+health-check conditions in `docker-compose.yml`, not just container-started
+ordering. No manual setup step is required first: `ledger-service`
+provisions its own restricted database role's password on every
+startup (see `ledger-service/README.md`'s "First-time setup" for why
+that's not just baked into a migration file).
+
+**Not part of the stack yet:** `notification-service` and RabbitMQ —
+neither is built yet (see Architecture above) — nor PgBouncer. Each
+service's own README has its full setup, environment variables, and
+API docs.
+
+**Postgres and Redis aren't reachable directly from your host by
+default** — only `ledger-service` and `wallet-service`'s ports are
+published, matching what a production setup would actually expose.
+`ledger-service`/`wallet-service` still reach both over Compose's
+internal network regardless. To poke at either directly for debugging:
+
+```bash
+docker compose exec postgres psql -U postgres -d ledgerly
+docker compose exec redis redis-cli
+```
+
+Or, to get a real host-published port back (e.g. to point a GUI client
+at Postgres), copy `docker-compose.override.yml.example` to
+`docker-compose.override.yml` (gitignored, loaded automatically) — see
+that file and `docker-compose.yml`'s own comment for why it isn't the
+default.
+
+### Prove it scales yourself (roadmap)
 
 This project runs on a single small server for the live demo — but the
-architecture is designed to scale horizontally, and you can verify that
-yourself without needing real production infrastructure:
+architecture is designed to scale horizontally. The self-serve proof
+below isn't wired up yet (`docker-compose.yml` currently runs one fixed
+instance of each service on fixed host ports; scaling replicas needs a
+load balancer in front of them first — see "Scaling Roadmap"), but is
+the intended shape once it is:
 
 ```bash
 docker-compose up --scale wallet-service=5 --scale ledger-service=3

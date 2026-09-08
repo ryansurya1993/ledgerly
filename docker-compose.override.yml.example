@@ -1,0 +1,20 @@
+# Copy this file to docker-compose.override.yml (gitignored -- see
+# .gitignore) to publish Postgres and Redis ports directly to your
+# host, e.g. to run `psql`/`redis-cli` from outside Docker.
+#
+# Not needed to run the stack: ledger-service and wallet-service
+# already reach both over the internal `ledgerly` network by service
+# name, with no published port involved at all. See docker-compose.yml's
+# own comment for why these aren't published by default.
+#
+# Compose merges docker-compose.override.yml into docker-compose.yml
+# automatically on `docker-compose up` -- no `-f` flag needed.
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

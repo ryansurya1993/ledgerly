@@ -1,5 +1,6 @@
 PROJECT_BRIEF.md
 .env
+docker-compose.override.yml
 *.log
 /bin/
 /tmp/

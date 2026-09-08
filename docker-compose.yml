@@ -1,0 +1,116 @@
+# Local dev / self-serve scaling demo stack: Postgres, Redis,
+# ledger-service, and wallet-service, all reachable from each other by
+# service name on the `ledgerly` network (e.g. wallet-service calls
+# ledger-service at http://ledger-service:8080, never localhost).
+#
+# `docker-compose up` alone brings up a fully working stack -- no
+# manual ALTER ROLE step, no manual .env file required. The
+# LEDGER_MIGRATE_DB_PASSWORD / LEDGER_APP_DB_PASSWORD defaults below
+# (via `${VAR:-default}`) are throwaway local-dev-only credentials,
+# committed on purpose, the same way `internal/ledger`'s test suite
+# hardcodes its own throwaway Postgres password -- see that package's
+# testdb_test.go. They are never used in production; production sets
+# real values from a Kubernetes Secret (see each service's README). To
+# override them locally instead of editing this file, copy
+# `.env.example` to `.env` (gitignored) and change the values there --
+# Compose loads `.env` automatically.
+#
+# Postgres and Redis deliberately publish no ports to the host below --
+# a production-minded setup never exposes the database layer directly,
+# only the services that are meant to be reached from outside the
+# cluster (here, ledger-service and wallet-service). ledger-service and
+# wallet-service still reach both over the internal `ledgerly` network
+# by service name (`postgres:5432`, `redis:6379`) without any published
+# port at all -- that's how Compose networking works regardless. If you
+# need `psql`/`redis-cli` from your host for local debugging, either
+# run it via `docker compose exec postgres psql -U postgres -d ledgerly`
+# / `docker compose exec redis redis-cli`, or copy
+# `docker-compose.override.yml.example` to `docker-compose.override.yml`
+# (gitignored, auto-loaded by Compose) to publish those ports back.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${LEDGER_MIGRATE_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${LEDGER_MIGRATE_DB_PASSWORD:-devsecret_migrate}
+      POSTGRES_DB: ${LEDGER_DB_NAME:-ledgerly}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LEDGER_MIGRATE_DB_USER:-postgres} -d ${LEDGER_DB_NAME:-ledgerly}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ledgerly
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ledgerly
+
+  ledger-service:
+    build:
+      context: ./ledger-service
+    environment:
+      LEDGER_DB_HOST: postgres
+      LEDGER_DB_PORT: "5432"
+      LEDGER_DB_NAME: ${LEDGER_DB_NAME:-ledgerly}
+      LEDGER_DB_SSLMODE: disable
+      LEDGER_APP_DB_USER: ${LEDGER_APP_DB_USER:-ledger_app}
+      LEDGER_APP_DB_PASSWORD: ${LEDGER_APP_DB_PASSWORD:-devsecret_app}
+      LEDGER_MIGRATE_DB_USER: ${LEDGER_MIGRATE_DB_USER:-postgres}
+      LEDGER_MIGRATE_DB_PASSWORD: ${LEDGER_MIGRATE_DB_PASSWORD:-devsecret_migrate}
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - ledgerly
+
+  wallet-service:
+    build:
+      context: ./wallet-service
+    environment:
+      PORT: "8081"
+      LEDGER_SERVICE_URL: http://ledger-service:8080
+      WALLET_REDIS_ADDR: redis:6379
+      WALLET_REDIS_PASSWORD: ""
+      WALLET_REDIS_DB: "0"
+      WALLET_IDEMPOTENCY_TTL_HOURS: "24"
+    ports:
+      - "8081:8081"
+    depends_on:
+      ledger-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - ledgerly
+
+volumes:
+  pg_data:
+
+networks:
+  ledgerly:
+    driver: bridge
