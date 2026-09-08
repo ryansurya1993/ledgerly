@@ -13,10 +13,14 @@ import (
 
 // newTestLedger returns a Ledger backed by the real, migrated Postgres
 // instance TestMain started, skipping t if that instance isn't
-// available.
+// available. Its publisher is nil: most tests here have nothing to do
+// with event publishing, and a nil EventPublisher is exactly what
+// production leaves it as when notifications aren't wanted -- see
+// publish_test.go for the tests that specifically exercise a
+// publisher.
 func newTestLedger(t *testing.T) *Ledger {
 	t.Helper()
-	return New(requireTestDB(t))
+	return New(requireTestDB(t), nil)
 }
 
 func mustCreateWallet(t *testing.T, l *Ledger, name string) Account {

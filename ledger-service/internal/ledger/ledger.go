@@ -32,17 +32,22 @@ type DB interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-// Ledger is the entry point for this package's business logic. It holds
-// no state of its own beyond the DB handle -- per CLAUDE.md, Postgres is
-// the only source of truth, so every method here reads or writes
-// through db on every call.
+// Ledger is the entry point for this package's business logic. Per
+// CLAUDE.md, Postgres (via db) is the only source of truth -- every
+// method here reads or writes through db on every call. publisher is
+// the one exception to "no state of its own," and it's not
+// state in that sense either: it's an outbound notification side
+// channel (see events.go), never consulted to answer a request, only
+// notified after one succeeds.
 type Ledger struct {
-	db DB
+	db        DB
+	publisher EventPublisher
 }
 
-// New wraps db (typically a *pgxpool.Pool) in a Ledger.
-func New(db DB) *Ledger {
-	return &Ledger{db: db}
+// New wraps db (typically a *pgxpool.Pool) in a Ledger. publisher may
+// be nil -- see EventPublisher's doc comment.
+func New(db DB, publisher EventPublisher) *Ledger {
+	return &Ledger{db: db, publisher: publisher}
 }
 
 // CreateAccountParams describes a new account to create.

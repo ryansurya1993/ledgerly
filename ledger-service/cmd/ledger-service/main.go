@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ryansurya1993/ledgerly/ledger-service/internal/db"
+	"github.com/ryansurya1993/ledgerly/ledger-service/internal/events"
 	"github.com/ryansurya1993/ledgerly/ledger-service/internal/handler"
 	"github.com/ryansurya1993/ledgerly/ledger-service/internal/ledger"
 )
@@ -39,7 +40,16 @@ func main() {
 	}
 	defer pool.Close()
 
-	ledgerSvc := ledger.New(pool)
+	// RabbitMQ is not a dependency the service needs to be reachable to
+	// serve traffic correctly -- see internal/ledger/events.go's doc
+	// comment -- so an unreachable broker here is logged, not fatal.
+	publisher, err := events.NewPublisher(events.LoadConfig())
+	if err != nil {
+		log.Printf("events: initial RabbitMQ connection failed, will retry on first publish: %v", err)
+	}
+	defer publisher.Close()
+
+	ledgerSvc := ledger.New(pool, publisher)
 
 	port := os.Getenv("PORT")
 	if port == "" {
