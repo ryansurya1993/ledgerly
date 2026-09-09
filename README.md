@@ -122,9 +122,7 @@ Open **http://localhost:8081/** once the stack is up — that's the
 whole demo UI: create a wallet, top it up, transfer between wallets,
 and run the stress-test panel described below.
 
-> 🖼️ **Screenshot goes here.** *(Placeholder — swap this line for an
-> actual `![Ledgerly frontend](docs/screenshot.png)` once one's been
-> taken against the running stack.)*
+> 🖼️ *(placeholder)*
 
 The frontend is plain HTML/CSS/vanilla JS in [`frontend/`](frontend) at
 the repo root — no build step, no framework, no npm dependencies, per
