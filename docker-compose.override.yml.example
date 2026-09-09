@@ -1,14 +1,26 @@
 # Copy this file to docker-compose.override.yml (gitignored -- see
-# .gitignore) to publish Postgres, Redis, and RabbitMQ ports directly
-# to your host, e.g. to run `psql`/`redis-cli` from outside Docker, or
-# open RabbitMQ's management UI at http://localhost:15672 (login with
+# .gitignore) to publish Postgres, PgBouncer, Redis, RabbitMQ, and
+# ledger-service's ports directly to your host, e.g. to run
+# `psql`/`redis-cli` from outside Docker, point a Postgres GUI client
+# at PgBouncer instead of Postgres directly, open RabbitMQ's management
+# UI at http://localhost:15672 (login with
 # RABBITMQ_USER/RABBITMQ_PASSWORD -- see .env.example; defaults to
-# ledgerly/devsecret_rabbitmq).
+# ledgerly/devsecret_rabbitmq), or `curl localhost:8080` against
+# ledger-service directly instead of through wallet-service.
 #
-# Not needed to run the stack: every service already reaches all three
-# over the internal `ledgerly` network by service name, with no
+# Not needed to run the stack: every service already reaches all of
+# these over the internal `ledgerly` network by service name, with no
 # published port involved at all. See docker-compose.yml's own comment
 # for why these aren't published by default.
+#
+# ledger-service only makes sense to add here for a single,
+# non-scaled instance (`docker-compose up`, no `--scale`) -- see the
+# root README's "Prove it scales yourself" section for why a fixed
+# port and multiple replicas of the same service don't mix, which is
+# also why this file doesn't attempt to add one for wallet-service:
+# it's already published in the base file for exactly the frontend's
+# sake, and scaling it needs docker-compose.scale.yml's *different*
+# (unfixed) port instead of a fixed one added here.
 #
 # Compose merges docker-compose.override.yml into docker-compose.yml
 # automatically on `docker-compose up` -- no `-f` flag needed.
@@ -18,6 +30,10 @@ services:
     ports:
       - "5432:5432"
 
+  pgbouncer:
+    ports:
+      - "6432:6432"
+
   redis:
     ports:
       - "6379:6379"
@@ -26,3 +42,7 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+
+  ledger-service:
+    ports:
+      - "8080:8080"

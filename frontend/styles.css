@@ -1,0 +1,346 @@
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --border: #e3e6eb;
+  --text: #1a1d23;
+  --text-muted: #6b7280;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --success: #15803d;
+  --success-bg: #dcfce7;
+  --success-border: #bbf7d0;
+  --danger: #b91c1c;
+  --danger-bg: #fee2e2;
+  --danger-border: #fecaca;
+  --pending: #92400e;
+  --pending-bg: #fef3c7;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+h1, h2, h3 { margin: 0 0 4px; font-weight: 650; }
+h2 { font-size: 1.05rem; letter-spacing: 0.01em; }
+h3 { font-size: 0.92rem; color: var(--text); margin-top: 0; }
+p { margin: 6px 0; }
+
+.mono { font-family: var(--mono); }
+.muted { color: var(--text-muted); }
+.small { font-size: 0.84rem; }
+
+/* ---------- Header ---------- */
+.site-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.site-header-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-mark {
+  font-size: 1.6rem;
+  color: var(--primary);
+  line-height: 1;
+}
+.tagline { margin: 0; color: var(--text-muted); font-size: 0.88rem; }
+.stack-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+/* ---------- Layout ---------- */
+.layout {
+  max-width: 1180px;
+  margin: 24px auto;
+  padding: 0 24px 24px;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.feed-card { grid-column: 1 / -1; }
+
+@media (max-width: 880px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px 22px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+/* ---------- Forms / inputs ---------- */
+.inline-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+input[type="text"], input[type="number"], select {
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  min-width: 0;
+}
+input[type="text"] { flex: 1 1 180px; }
+
+/* Native <select> chrome (its own built-in dropdown arrow box, and a
+   line-height that doesn't always match text inputs even with
+   identical font-size/padding) renders taller/bulkier than a same-CSS
+   text input in most browsers -- appearance: none strips that native
+   chrome so the shared rule above is what actually determines its
+   size, and the hand-drawn chevron below replaces the arrow it just
+   removed. white-space/overflow keep it single-line regardless of how
+   long its currently-shown text is, now that appearance: none has
+   also removed the native single-line clipping that used to do this
+   for free. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='5 7 10 12 15 7'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px 14px;
+  padding-right: 32px;
+}
+/* flex-basis only ever meant "give this select a sensible starting
+   *width*" -- true for #walletSelect, the one select that actually
+   sits in a row-direction flex container (.inline-form) where the
+   main axis (and so flex-basis) is horizontal. #transferDest sits in
+   .action-box, a COLUMN-direction flex container, where the main axis
+   is vertical -- the exact same "flex: 1 1 160px" there was setting a
+   160px flex-basis *height* instead, which is the actual, only cause
+   of it rendering enormous (confirmed by rendering both selects
+   headlessly and reading getBoundingClientRect() back: 160.0px on the
+   nose, with font-size/line-height/padding/border all identical
+   between the two elements). Scoping this to .inline-form select
+   keeps the fix local to the layout that needs it, and lets
+   #transferDest fall back to the same plain full-width, auto-height
+   sizing #transferAmount right below it already uses correctly. */
+.inline-form select { flex: 1 1 160px; }
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+.btn {
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn-secondary:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+
+.field-row { margin: 10px 0; }
+.field-row > label { display: block; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px; }
+
+.field-error, .field-success {
+  font-size: 0.85rem;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 10px;
+  /* A couple of these messages now carry an actual "\n" (e.g. the
+     transaction ID on its own line above the rest) -- pre-line renders
+     that as a real line break while still collapsing any other run of
+     whitespace, so a plain single-line message looks exactly as before. */
+  white-space: pre-line;
+}
+.field-error { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-border); }
+.field-success { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+
+/* ---------- Wallet summary ---------- */
+.wallet-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  margin: 14px 0;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.wallet-summary-name { font-weight: 650; font-size: 1.05rem; }
+.wallet-summary-id { font-size: 0.76rem; color: var(--text-muted); word-break: break-all; }
+.wallet-balance { text-align: right; }
+.wallet-balance-value { font-size: 1.6rem; font-weight: 700; color: var(--primary); font-family: var(--mono); }
+.wallet-balance-label { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 14px 0;
+}
+.action-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.action-box .btn { align-self: flex-start; }
+
+.history-heading { margin-top: 18px; }
+.table-wrap {
+  overflow: auto;
+  max-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th {
+  position: sticky;
+  top: 0;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.desc { white-space: normal; }
+.dir-credit { color: var(--success); font-weight: 600; }
+.dir-debit { color: var(--danger); font-weight: 600; }
+
+/* ---------- Stress panel ---------- */
+.stress-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.test-block { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.test-block:first-of-type { border-top: none; margin-top: 10px; padding-top: 0; }
+.n-label { font-size: 0.82rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
+.n-label input { width: 72px; }
+
+.result-box {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.result-box.ok { background: var(--success-bg); border-color: var(--success-border); color: var(--success); }
+.result-box.bad { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger); }
+.result-line { display: flex; justify-content: space-between; gap: 10px; }
+.result-line + .result-line { margin-top: 4px; }
+.result-box .verdict { font-weight: 700; margin-top: 6px; }
+
+/* ---------- Badges (integrity / SSE) ---------- */
+.integrity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot-pending { background: var(--pending); }
+.dot-ok { background: var(--success); box-shadow: 0 0 0 3px var(--success-bg); }
+.dot-bad { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-bg); animation: pulse 1.2s infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ---------- Activity feed ---------- */
+.feed {
+  height: 220px;
+  overflow: auto;
+  background: #0f1115;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: #d1d5db;
+}
+.feed-empty { color: #6b7280; padding: 8px 0; }
+/* white-space: nowrap here (inherited by every span below, none of
+   which override it) keeps a whole event -- now carrying full,
+   unabbreviated UUIDs -- on one line. Left to the default wrapping
+   behavior, a long hyphenated string like a UUID is a valid break
+   point, so it would wrap mid-ID across lines instead of staying
+   readable and copy-pasteable as one token. .feed's own overflow: auto
+   (not just overflow-y) is what makes a line wider than the panel
+   scroll horizontally instead of being clipped now that it's no longer
+   allowed to wrap. */
+.feed-line { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; gap: 10px; white-space: nowrap; }
+.feed-line:last-child { border-bottom: none; }
+.feed-time { color: #6b7280; flex-shrink: 0; }
+.feed-type { color: #818cf8; flex-shrink: 0; }
+.feed-txid { color: #6b7280; flex-shrink: 0; }
+.feed-detail { color: #d1d5db; }
+.feed-amount-credit { color: #4ade80; }
+.feed-amount-debit { color: #f87171; }
+
+/* ---------- Footer ---------- */
+.site-footer {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 20px 0 32px;
+}
+.site-footer a { color: var(--primary); text-decoration: none; }
+.site-footer a:hover { text-decoration: underline; }

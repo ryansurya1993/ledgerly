@@ -1,0 +1,26 @@
+# Overlay that adds a k6 load-test runner to the stack -- combine with
+# the base file, don't run standalone:
+#
+#   docker-compose -f docker-compose.yml -f docker-compose.loadtest.yml \
+#     run --rm k6
+#
+# See k6/loadtest.js for what it actually does, and the root README's
+# "Prove it scales yourself" section for the full walkthrough. This
+# file deliberately doesn't redeclare the `ledgerly` network (or set
+# `external: true` against a guessed project-qualified name) -- when
+# Compose is given multiple `-f` files together, it merges their
+# top-level `networks:` sections by key before evaluating any service,
+# so `k6` below resolves against the same `ledgerly` network
+# docker-compose.yml already defines as long as both files are passed
+# together, with nothing to keep in sync if the project/directory name
+# ever changes.
+services:
+  k6:
+    image: grafana/k6:latest
+    volumes:
+      - ./k6:/scripts:ro
+    environment:
+      WALLET_BASE_URL: http://wallet-service:8081
+    command: run /scripts/loadtest.js
+    networks:
+      - ledgerly

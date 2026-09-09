@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledgerly</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <div class="brand">
+      <span class="brand-mark">◎</span>
+      <div>
+        <h1>Ledgerly</h1>
+        <p class="tagline">A double-entry ledger with a wallet-style interface</p>
+      </div>
+    </div>
+    <div class="stack-badges" aria-label="Services">
+      <span class="badge">ledger-service :8080</span>
+      <span class="badge">wallet-service :8081</span>
+      <span class="badge">notification-service :8082</span>
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ WALLET PANEL ============ -->
+  <section class="card" id="walletPanel">
+    <h2>Wallet</h2>
+
+    <form id="createWalletForm" class="inline-form">
+      <input type="text" id="newWalletName" placeholder="New wallet name (e.g. Alice)" required>
+      <button type="submit" class="btn btn-primary">Create wallet</button>
+    </form>
+    <p id="createWalletError" class="field-error" hidden></p>
+
+    <div class="divider"></div>
+
+    <div class="field-row">
+      <label for="walletSelect">Select a wallet</label>
+      <div class="inline-form">
+        <select id="walletSelect">
+          <option value="">— none yet —</option>
+        </select>
+        <input type="text" id="loadWalletId" placeholder="or paste a wallet ID…">
+        <button type="button" id="loadWalletBtn" class="btn btn-secondary">Load</button>
+      </div>
+    </div>
+    <p id="loadWalletError" class="field-error" hidden></p>
+
+    <div id="selectedWalletPanel" hidden>
+      <div class="wallet-summary">
+        <div>
+          <div class="wallet-summary-name" id="selectedWalletName">—</div>
+          <div class="wallet-summary-id mono" id="selectedWalletId">—</div>
+        </div>
+        <div class="wallet-balance">
+          <div class="wallet-balance-value" id="selectedWalletBalance">$0.00</div>
+          <div class="wallet-balance-label">balance</div>
+        </div>
+      </div>
+
+      <div class="actions-stack">
+        <form id="topupForm" class="action-box">
+          <h3>Top up</h3>
+          <input type="number" id="topupAmount" placeholder="Amount (USD)" min="0.01" step="0.01" value="10.00" required>
+          <button type="submit" class="btn btn-primary">Top up</button>
+        </form>
+
+        <form id="transferForm" class="action-box">
+          <h3>Transfer</h3>
+          <select id="transferDest" required>
+            <option value="" disabled selected>— no other wallets yet —</option>
+          </select>
+          <input type="number" id="transferAmount" placeholder="Amount (USD)" min="0.01" step="0.01" value="5.00" required>
+          <button type="submit" class="btn btn-primary">Transfer</button>
+        </form>
+      </div>
+      <p id="actionResult" class="field-error" hidden></p>
+      <p id="actionSuccess" class="field-success" hidden></p>
+
+      <h3 class="history-heading">History</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>When</th><th>Type</th><th>Direction</th><th>Amount</th><th>Description</th></tr>
+          </thead>
+          <tbody id="historyBody">
+            <tr><td colspan="5" class="muted">No entries yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STRESS-TEST PANEL ============ -->
+  <section class="card" id="stressPanel">
+    <div class="stress-header">
+      <h2>Stress test</h2>
+      <div class="integrity-badge" id="integrityBadge" title="Polls GET /integrity every few seconds">
+        <span class="dot dot-pending" id="integrityDot"></span>
+        <span id="integrityText">checking…</span>
+      </div>
+    </div>
+    <p class="muted small">
+      Select a wallet first — everything below acts on it.
+    </p>
+
+    <div class="test-block">
+      <h3>(a) Fire N idempotent replays</h3>
+      <p class="muted small">
+        Fires N simultaneous top-ups that all reuse the <em>same</em> idempotency key.
+        Proves: no matter how many duplicate/racing requests arrive, only one
+        transaction is ever created.
+      </p>
+      <div class="inline-form">
+        <label class="n-label">N = <input type="number" id="replayN" value="20" min="2" max="200"></label>
+        <button type="button" id="fireReplaysBtn" class="btn btn-secondary">Fire N idempotent replays</button>
+      </div>
+      <div class="result-box" id="replayResult" hidden></div>
+    </div>
+
+    <div class="test-block">
+      <h3>(b) Fire N concurrent transfers</h3>
+      <p class="muted small">
+        Fires N simultaneous transfers, each with a <em>different</em> idempotency key.
+        Proves: ledger-service's optimistic-concurrency retry logic serializes genuinely
+        concurrent balance updates without losing any.
+      </p>
+      <div class="inline-form">
+        <label class="n-label">N = <input type="number" id="concurrentN" value="20" min="2" max="200"></label>
+        <label class="n-label">$ = <input type="number" id="concurrentAmount" value="1.00" min="0.01" step="0.01"></label>
+        <button type="button" id="fireConcurrentBtn" class="btn btn-secondary">Fire N concurrent transfers</button>
+      </div>
+      <div class="result-box" id="concurrentResult" hidden></div>
+    </div>
+
+    <div class="test-block">
+      <h3>(c) Try to overdraft</h3>
+      <p class="muted small">
+        Attempts to transfer more than the wallet's current balance. Should be cleanly rejected.
+      </p>
+      <button type="button" id="overdraftBtn" class="btn btn-secondary">Try to overdraft</button>
+      <div class="result-box" id="overdraftResult" hidden></div>
+    </div>
+
+    <div class="test-block">
+      <h3>(d) Replay last transaction</h3>
+      <p class="muted small">
+        Resubmits your most recent top-up/transfer with the exact same idempotency key.
+      </p>
+      <button type="button" id="replayLastBtn" class="btn btn-secondary" disabled>Replay last transaction</button>
+      <div class="result-box" id="replayLastResult" hidden></div>
+    </div>
+  </section>
+
+  <!-- ============ LIVE ACTIVITY FEED ============ -->
+  <section class="card feed-card">
+    <div class="stress-header">
+      <h2>Live activity feed</h2>
+      <div class="integrity-badge" id="sseBadge">
+        <span class="dot dot-pending" id="sseDot"></span>
+        <span id="sseText">connecting…</span>
+      </div>
+    </div>
+    <p class="muted small">
+      Streamed live from notification-service over Server-Sent Events — every transaction
+      posted anywhere appears here the moment it commits.
+    </p>
+    <div class="feed" id="activityFeed">
+      <div class="feed-empty">Waiting for the first event…</div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  Built with Go · PostgreSQL · Redis · RabbitMQ — see the
+  <a href="https://github.com/ryansurya1993/ledgerly" target="_blank" rel="noopener">source</a>.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -48,6 +48,62 @@ services:
     networks:
       - ledgerly
 
+  # Sits in front of Postgres for ledger-service's runtime traffic
+  # only -- migrations always go straight to Postgres (LEDGER_MIGRATE_DB_HOST
+  # below) and never through here. See ledger-service/README.md's
+  # "PgBouncer" section for the full reasoning (transaction pooling,
+  # why migrations can't use it, why pgx needs QueryExecModeExec once
+  # something in front of Postgres is doing transaction pooling).
+  #
+  # This image (pgbouncer/pgbouncer, confirmed by extracting and
+  # reading /opt/pgbouncer/entrypoint.sh from the actual pulled image,
+  # not assumed) takes no config file at all -- it *generates*
+  # /etc/pgbouncer/pgbouncer.ini itself from DATABASES_*/PGBOUNCER_*
+  # environment variables on every start, and refuses to start at all
+  # without at least DATABASES_HOST or DATABASES set. With
+  # DATABASES_CLIENT_SIDE_DBNAME left unset, the generated [databases]
+  # entry is a wildcard (`*`) that proxies any client-requested dbname
+  # to the one DATABASES_DBNAME upstream -- confirmed against a real
+  # container: connecting to this service as ledger_app/<password>
+  # requesting dbname "ledgerly" actually reaches Postgres as that
+  # role, against that database.
+  #
+  # PGBOUNCER_AUTH_TYPE=any means PgBouncer performs no authentication
+  # of its own on incoming (client-side) connections -- it always
+  # authenticates upstream to Postgres using DATABASES_USER/PASSWORD
+  # below, regardless of what a client presents. That's a deliberate
+  # local-dev simplification, safe here because this service is never
+  # published to the host (see the top-of-file port-exposure policy)
+  # and only ledger-service, on the internal network, ever talks to
+  # it -- a production deployment would use a real auth_type
+  # (scram-sha-256) with a proper userlist/auth_query instead.
+  pgbouncer:
+    image: pgbouncer/pgbouncer:latest
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: "5432"
+      DATABASES_DBNAME: ${LEDGER_DB_NAME:-ledgerly}
+      DATABASES_USER: ${LEDGER_APP_DB_USER:-ledger_app}
+      DATABASES_PASSWORD: ${LEDGER_APP_DB_PASSWORD:-devsecret_app}
+      PGBOUNCER_LISTEN_PORT: "6432"
+      PGBOUNCER_AUTH_TYPE: any
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "200"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "20"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # `nc` (busybox) is confirmed present in this image by shelling
+    # into a real running container -- `nc -z` here isn't a guess.
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "6432"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+    networks:
+      - ledgerly
+
   redis:
     image: redis:7-alpine
     healthcheck:
@@ -96,8 +152,21 @@ services:
     build:
       context: ./ledger-service
     environment:
-      LEDGER_DB_HOST: postgres
-      LEDGER_DB_PORT: "5432"
+      # The runtime pool (AppDSN) goes through PgBouncer, not straight
+      # to Postgres -- see ledger-service/README.md's "PgBouncer"
+      # section. This is the one place LEDGER_DB_HOST really matters
+      # for the self-serve scaling demo: `--scale ledger-service=3`
+      # only avoids overwhelming Postgres's connection budget because
+      # every replica's pool comes through here.
+      LEDGER_DB_HOST: pgbouncer
+      LEDGER_DB_PORT: "6432"
+      # Migrations (and ledger_app's password provisioning) always go
+      # straight to Postgres, deliberately bypassing PgBouncer -- see
+      # MigrateURL's doc comment in internal/db/config.go for why
+      # transaction pooling and golang-migrate's advisory-lock-based
+      # serialization don't mix.
+      LEDGER_MIGRATE_DB_HOST: postgres
+      LEDGER_MIGRATE_DB_PORT: "5432"
       LEDGER_DB_NAME: ${LEDGER_DB_NAME:-ledgerly}
       LEDGER_DB_SSLMODE: disable
       LEDGER_APP_DB_USER: ${LEDGER_APP_DB_USER:-ledger_app}
@@ -106,10 +175,21 @@ services:
       LEDGER_MIGRATE_DB_PASSWORD: ${LEDGER_MIGRATE_DB_PASSWORD:-devsecret_migrate}
       LEDGER_RABBITMQ_URL: amqp://${RABBITMQ_USER:-ledgerly}:${RABBITMQ_PASSWORD:-devsecret_rabbitmq}@rabbitmq:5672/
       PORT: "8080"
-    ports:
-      - "8080:8080"
+    # No fixed host port published here anymore -- see the "Prove it
+    # scales yourself" section of the root README. `--scale
+    # ledger-service=3` cannot start 3 containers that all try to bind
+    # the *same* host port; wallet-service reaches ledger-service by
+    # service name over the internal network regardless, so a replica
+    # never needed a published port for anything but ad-hoc debugging.
+    # Use `docker compose port ledger-service 8080 --index=<n>` (or the
+    # override file) to reach a specific replica directly if you need
+    # to.
+    expose:
+      - "8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       # Not required for correctness -- ledger-service's own
       # internal/events.Publisher connects lazily and degrades to
@@ -139,6 +219,17 @@ services:
       WALLET_REDIS_PASSWORD: ""
       WALLET_REDIS_DB: "0"
       WALLET_IDEMPOTENCY_TTL_HOURS: "24"
+      FRONTEND_DIR: /frontend
+    # The demo frontend (../frontend, a top-level directory -- not part
+    # of any one service's own module) is bind-mounted in rather than
+    # copied into the image at build time: it's static HTML/CSS/JS with
+    # no build step, so there's nothing to compile in, and mounting it
+    # means editing a frontend file takes effect on the next browser
+    # refresh with no image rebuild. See the root README's frontend
+    # section for why wallet-service is what serves it (same-origin
+    # with its own API, so the page needs no CORS handling at all).
+    volumes:
+      - ./frontend:/frontend:ro
     ports:
       - "8081:8081"
     # No rabbitmq dependency here, unlike ledger-service and

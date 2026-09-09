@@ -1,0 +1,56 @@
+# Overlay for the self-serve scaling demo -- combine with the base
+# file, don't run standalone:
+#
+#   docker-compose -f docker-compose.yml -f docker-compose.scale.yml \
+#     up -d --scale ledger-service=3 --scale wallet-service=5
+#
+# See the root README's "Prove it scales yourself" section for the
+# full walkthrough and why this is a separate file rather than just
+# baked into docker-compose.yml.
+#
+# ledger-service already has no fixed host port in the base file (it's
+# only ever reached over the internal network, by wallet-service or by
+# this overlay's own k6 container -- see docker-compose.loadtest.yml),
+# so it needs no override here to scale cleanly. wallet-service is the
+# one exception: the base file gives it a *fixed* host port (8081:8081)
+# so the demo frontend has one stable, known address to hard-code
+# against (see frontend/app.js) -- but Compose can't bind that same
+# fixed host port for more than one replica at once, which is exactly
+# what `--scale wallet-service=5` needs to do. This overlay replaces
+# that fixed mapping with an unfixed one (just the container port, no
+# host port specified), so Compose assigns each replica its own
+# free host port instead of all fighting over 8081 -- find a specific
+# replica's assigned port with `docker compose port wallet-service
+# 8081 --index=<n>`.
+#
+# The frontend itself is a single-stable-URL, browser-facing
+# experience, and genuinely can't benefit from 5 randomly-numbered
+# wallet-service ports without a load balancer unifying them behind one
+# address -- that's real, not-yet-built future work (see the root
+# README's Scaling Roadmap), not something this overlay tries to paper
+# over. What this overlay *does* prove: multiple replicas of both
+# services start, stay healthy, and serve requests correctly against
+# the same shared Postgres/Redis state -- see "Prove it scales
+# yourself" for how to verify that curling several different replicas
+# directly.
+#
+# `!override` (not plain `ports:`, and not `!reset`) is required here.
+# Compose's default merge behavior for a *list*-valued key like `ports`
+# is to concatenate the base and overlay lists, not replace one with
+# the other -- verified directly against this repo's own files
+# (`docker compose -f docker-compose.yml -f docker-compose.scale.yml
+# config` used to show *two* port entries for wallet-service: the
+# base's fixed 8081:8081 AND this file's unfixed 8081, both still
+# trying to bind at once). `!reset` doesn't fix this either -- verified
+# directly, not assumed: per the Compose Specification, `!reset`
+# discards the merged value entirely and ignores whatever value follows
+# it (documented as "a valid value must be provided, but will be
+# ignored"), so `ports: !reset ["8081"]` resolves to no ports at all,
+# not the new one. `!override` is the tag actually documented for "fully
+# replace this attribute, bypassing normal merge rules" -- confirmed
+# against this exact Compose version (v5.5.0) to produce exactly one
+# port entry (the unfixed one below), not two.
+services:
+  wallet-service:
+    ports: !override
+      - "8081"
