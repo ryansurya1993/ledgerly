@@ -116,6 +116,50 @@ func TestGetHistory_Success(t *testing.T) {
 	}
 }
 
+func TestGetIntegrity_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/integrity" || r.Method != http.MethodGet {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(IntegrityResponse{
+			Results: []IntegrityResult{{AccountID: "acc-1", CachedBalance: 500, ComputedBalance: 500}},
+			Drifted: false,
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil)
+	integrity, err := c.GetIntegrity(context.Background())
+	if err != nil {
+		t.Fatalf("GetIntegrity: %v", err)
+	}
+	if len(integrity.Results) != 1 || integrity.Results[0].AccountID != "acc-1" {
+		t.Errorf("integrity = %+v", integrity)
+	}
+}
+
+func TestListAccounts_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/accounts" || r.Method != http.MethodGet {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		json.NewEncoder(w).Encode([]Account{
+			{ID: "acc-1", Name: "Alice", AccountType: "wallet", Currency: "USD", Balance: 500},
+			{ID: "acc-2", Name: "Bob", AccountType: "wallet", Currency: "USD", Balance: 0},
+		})
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil)
+	accounts, err := c.ListAccounts(context.Background())
+	if err != nil {
+		t.Fatalf("ListAccounts: %v", err)
+	}
+	if len(accounts) != 2 || accounts[0].ID != "acc-1" || accounts[1].ID != "acc-2" {
+		t.Errorf("accounts = %+v", accounts)
+	}
+}
+
 func TestDo_NonSuccessStatusReturnsAPIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

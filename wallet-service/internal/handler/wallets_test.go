@@ -106,6 +106,83 @@ func TestCreateWallet_LedgerErrorMapsThrough(t *testing.T) {
 	}
 }
 
+func TestListWallets_Success(t *testing.T) {
+	now := time.Now().UTC()
+	ledger := &fakeLedgerClient{
+		listAccountsFunc: func(ctx context.Context) ([]ledgerclient.Account, error) {
+			return []ledgerclient.Account{
+				{ID: "acc-1", Name: "Alice", AccountType: "wallet", Currency: "USD", Balance: 500, Version: 2, CreatedAt: now, UpdatedAt: now},
+				{ID: "acc-2", Name: "Bob", AccountType: "wallet", Currency: "USD", Balance: 0, Version: 0, CreatedAt: now, UpdatedAt: now},
+			}, nil
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/wallets", nil)
+	w := httptest.NewRecorder()
+
+	ListWallets(ledger)(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Same leak check as CreateWallet's: account_type/version are
+	// ledger-service implementation details that must not appear in a
+	// wallet-shaped list response either.
+	var raw []map[string]any
+	decodeJSON(t, w, &raw)
+	if len(raw) != 2 {
+		t.Fatalf("len(raw) = %d, want 2", len(raw))
+	}
+	for _, item := range raw {
+		if _, present := item["account_type"]; present {
+			t.Errorf("response leaks account_type: %v", item)
+		}
+		if _, present := item["version"]; present {
+			t.Errorf("response leaks version: %v", item)
+		}
+	}
+	if raw[0]["id"] != "acc-1" || raw[1]["id"] != "acc-2" {
+		t.Errorf("raw = %v", raw)
+	}
+}
+
+func TestListWallets_EmptyReturnsEmptyArrayNotNull(t *testing.T) {
+	ledger := &fakeLedgerClient{
+		listAccountsFunc: func(ctx context.Context) ([]ledgerclient.Account, error) {
+			return nil, nil
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/wallets", nil)
+	w := httptest.NewRecorder()
+
+	ListWallets(ledger)(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Body.String(); got != "[]\n" && got != "[]" {
+		t.Errorf("body = %q, want an empty JSON array, not null", got)
+	}
+}
+
+func TestListWallets_LedgerErrorMapsThrough(t *testing.T) {
+	ledger := &fakeLedgerClient{
+		listAccountsFunc: func(ctx context.Context) ([]ledgerclient.Account, error) {
+			return nil, &ledgerclient.APIError{StatusCode: http.StatusBadGateway, Message: "boom"}
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/wallets", nil)
+	w := httptest.NewRecorder()
+
+	ListWallets(ledger)(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+}
+
 func TestGetWalletBalance_Success(t *testing.T) {
 	id := uuid.New()
 	ledger := &fakeLedgerClient{
@@ -294,7 +371,7 @@ func TestTopUp_NonPositiveAmountIs400(t *testing.T) {
 	}
 }
 
-func TestTopUp_IdempotencyCacheHitSkipsLedgerService(t *testing.T) {
+func TestTopUp_IdempotencyCacheHitReturnsReplayedTrue(t *testing.T) {
 	walletID := uuid.New()
 	ledger := &fakeLedgerClient{
 		postTransactionFunc: func(ctx context.Context, req ledgerclient.PostTransactionRequest) (ledgerclient.PostTransactionResponse, error) {
@@ -303,6 +380,10 @@ func TestTopUp_IdempotencyCacheHitSkipsLedgerService(t *testing.T) {
 		},
 	}
 	idem := newFakeIdempotencyStore()
+	// What's cached is the ORIGINAL call's own response -- like any
+	// brand-new transaction's first response, it necessarily said
+	// replayed: false with a 201, since that's what was true about
+	// itself at the time it was cached.
 	cachedBody := []byte(`{"transaction_id":"txn-cached","wallet_id":"w","amount":500,"replayed":false}`)
 	idem.entries["key-1"] = idempotency.CachedResponse{StatusCode: http.StatusCreated, Body: cachedBody}
 
@@ -313,11 +394,23 @@ func TestTopUp_IdempotencyCacheHitSkipsLedgerService(t *testing.T) {
 
 	TopUp(ledger, idem)(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusCreated)
+	// Reaching a cache hit at all proves this key was already processed
+	// successfully once before -- that's what "hit" means -- so the
+	// response must say so (200, replayed: true) rather than silently
+	// repeating the original call's now-stale "this is new" claim on
+	// every subsequent reuse of the same key.
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (a cache hit is always a replay)", w.Code, http.StatusOK)
 	}
-	if w.Body.String() != string(cachedBody) {
-		t.Errorf("body = %s, want the cached body verbatim: %s", w.Body.String(), cachedBody)
+	var got map[string]any
+	decodeJSON(t, w, &got)
+	if got["replayed"] != true {
+		t.Errorf("replayed = %v, want true", got["replayed"])
+	}
+	// Every other field still comes from the cached response verbatim --
+	// only "replayed" is patched.
+	if got["transaction_id"] != "txn-cached" || got["amount"] != float64(500) {
+		t.Errorf("cached fields not preserved: %+v", got)
 	}
 }
 

@@ -72,6 +72,30 @@ func CreateWallet(ledger LedgerClient) http.HandlerFunc {
 	}
 }
 
+// ListWallets handles GET /wallets: a passthrough to ledger-service's
+// GET /accounts, which already excludes system accounts like the
+// external funding source (see its Ledger.ListWalletAccounts doc
+// comment) -- so every account this returns is a real, selectable
+// wallet. Same convention as CreateWallet's response: account_type and
+// version are ledger-service implementation details, omitted here since
+// they're not part of a wallet-shaped API.
+func ListWallets(ledger LedgerClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		accounts, err := ledger.ListAccounts(r.Context())
+		if err != nil {
+			writeLedgerClientError(w, err)
+			return
+		}
+
+		resp := make([]walletResponse, len(accounts))
+		for i, a := range accounts {
+			resp[i] = newWalletResponse(a)
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
 // parseWalletID extracts and parses the {id} path value shared by every
 // /wallets/{id}/... route. On a malformed value it writes a 400
 // response itself and returns ok=false, so callers can just
@@ -340,9 +364,7 @@ func postTransaction(
 	ctx := r.Context()
 
 	if cached, found := lookupIdempotencyCache(ctx, idem, idempotencyKey); found {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(cached.StatusCode)
-		w.Write(cached.Body)
+		writeReplayedCacheHit(w, cached)
 		return
 	}
 
@@ -366,6 +388,33 @@ func postTransaction(
 	if err := idem.Set(ctx, idempotencyKey, cacheEntry); err != nil {
 		log.Printf("handler: failed to cache idempotent response for key %q (fast path only, not fatal): %v", idempotencyKey, err)
 	}
+}
+
+// writeReplayedCacheHit serves a Redis fast-path cache hit. Reaching
+// this function at all already proves this exact idempotency key was
+// processed successfully once before -- that's what "hit" means -- so
+// the response written here always reports replayed: true and status
+// 200, regardless of what got cached. What's cached is the very first
+// successful call's own response verbatim, which necessarily had
+// replayed: false and status 201 baked in (that's what a brand-new
+// transaction's own first response always says about itself); serving
+// that byte-for-byte on every later hit would silently repeat a
+// now-stale "this is new" claim forever, telling every caller after the
+// first one the opposite of what's true. Every other field (transaction
+// ID, amount, timestamps, ...) is left exactly as originally cached,
+// since those describe the transaction that actually happened and don't
+// change no matter how many times this key gets reused.
+func writeReplayedCacheHit(w http.ResponseWriter, cached idempotency.CachedResponse) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(cached.Body, &fields); err != nil {
+		log.Printf("handler: cached idempotent response body is not valid JSON, serving it verbatim (replayed flag may be stale): %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(cached.StatusCode)
+		w.Write(cached.Body)
+		return
+	}
+	fields["replayed"] = json.RawMessage("true")
+	writeJSON(w, http.StatusOK, fields)
 }
 
 // lookupIdempotencyCache checks the fast-path cache for key. Any Redis

@@ -27,6 +27,24 @@ func (p redisPinger) Ping(ctx context.Context) error {
 	return p.rdb.Ping(ctx).Err()
 }
 
+// noBrowserCache disables caching for the wrapped handler's responses.
+// http.FileServer sends a bare Last-Modified header and nothing else,
+// which gives browsers no explicit freshness lifetime to go by -- they
+// fall back to a heuristic (commonly a fraction of the time since
+// Last-Modified) and can keep serving an old cached copy across a
+// plain refresh, only revalidating on a hard reload. That's directly at
+// odds with this handler's own doc comment above ("editing
+// frontend/*.html|css|js takes effect on refresh"), and this is a local
+// demo served straight off disk, not a CDN-fronted production asset,
+// so there's no real performance cost to trading away for that
+// surprise.
+func noBrowserCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		h.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -50,10 +68,23 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handler.Health(redisPinger{rdb}))
 	mux.HandleFunc("POST /wallets", handler.CreateWallet(ledgerSvc))
+	mux.HandleFunc("GET /wallets", handler.ListWallets(ledgerSvc))
 	mux.HandleFunc("POST /wallets/{id}/topup", handler.TopUp(ledgerSvc, idemStore))
 	mux.HandleFunc("POST /wallets/{id}/transfer", handler.Transfer(ledgerSvc, idemStore))
 	mux.HandleFunc("GET /wallets/{id}/balance", handler.GetWalletBalance(ledgerSvc))
 	mux.HandleFunc("GET /wallets/{id}/history", handler.GetWalletHistory(ledgerSvc))
+	mux.HandleFunc("GET /integrity", handler.GetIntegrity(ledgerSvc))
+
+	// Serves the static demo frontend (see /frontend at the repo root)
+	// at every path not already claimed by a route above -- see the
+	// root README's frontend section for why wallet-service is what
+	// serves it. http.FileServer reads from disk on every request, so
+	// editing frontend/*.html|css|js takes effect on refresh with no
+	// rebuild or restart. This is intentionally the least-specific
+	// route: Go's ServeMux matches the API routes above first for the
+	// exact paths they claim, falling through to this for everything
+	// else ("/", "/app.js", "/styles.css", ...).
+	mux.Handle("/", noBrowserCache(http.FileServer(http.Dir(cfg.FrontendDir))))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

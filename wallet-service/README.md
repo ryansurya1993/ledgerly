@@ -13,9 +13,9 @@ the only thing in this service that calls it.
 ## How this fits together
 
 ```
-visitor → wallet-service → ledger-service → Postgres
-                ↕
-              Redis (fast-path idempotency cache only)
+browser (demo frontend) → wallet-service → ledger-service → Postgres
+                                ↕
+                              Redis (fast-path idempotency cache only)
 ```
 
 - `internal/ledgerclient` — a thin HTTP client for ledger-service's API.
@@ -30,6 +30,11 @@ visitor → wallet-service → ledger-service → Postgres
   request, build the ledger-service call, map the response (and any
   error) back into a wallet-shaped one.
 
+This is also what serves the demo frontend itself (plain static files,
+`FRONTEND_DIR` below) — see the root README's "Frontend" section for
+why the visitor-facing gateway is what hosts the visitor-facing page,
+not a separate static file server.
+
 ## Idempotency: fast path vs. correctness guarantee
 
 `POST /wallets/{id}/topup` and `POST /wallets/{id}/transfer` both take a
@@ -37,9 +42,17 @@ client-supplied `idempotency_key`. Two layers are involved, and only one
 of them is the actual correctness guarantee:
 
 1. **Fast path (this service, Redis):** before calling ledger-service,
-   `internal/idempotency.Store` checks Redis for the key. A hit replays
-   the original response immediately — no call to ledger-service at
-   all. On success, the response is cached under that key for
+   `internal/idempotency.Store` checks Redis for the key. A hit answers
+   immediately — no call to ledger-service at all — by replaying the
+   original successful response, except for one field: `replayed` is
+   always forced to `true` (and the status to `200`), regardless of what
+   the original response said. The original call's own response
+   necessarily said `replayed: false` with `201` — that's what's true
+   about *any* brand-new transaction's first response — and serving that
+   byte-for-byte on every later hit would keep telling every caller
+   after the first one the opposite of what's now true (see
+   `internal/handler.writeReplayedCacheHit`'s doc comment). On success,
+   the (real, `replayed: false`) response is cached under that key for
    `WALLET_IDEMPOTENCY_TTL_HOURS` (default 24h).
 2. **Correctness guarantee (ledger-service, Postgres):**
    `transactions.idempotency_key` has a `UNIQUE` constraint in
@@ -83,6 +96,7 @@ Requires ledger-service to already be running and migrated (see
 | `WALLET_REDIS_PASSWORD` | *(empty)* | No default auth for local dev; set in production via a `Secret`, never a `ConfigMap` or a committed file. |
 | `WALLET_REDIS_DB` | `0` | Redis logical DB index. |
 | `WALLET_IDEMPOTENCY_TTL_HOURS` | `24` | How long a cached top-up/transfer response is kept. |
+| `FRONTEND_DIR` | `../frontend` | Where the static demo frontend's files live — see `cmd/wallet-service/main.go` and the root README's "Frontend" section. The default resolves correctly for `go run ./cmd/wallet-service` from this directory; `docker-compose.yml` overrides it to `/frontend`, where it bind-mounts the repo's `frontend/` directory. |
 
 Unlike `ledger-service/internal/db.LoadConfig` (which fails startup
 immediately if its DB passwords are missing, because Postgres is a hard
@@ -127,6 +141,34 @@ Response `201 Created`:
 Note this omits ledger-service's `account_type` and `version` fields —
 both are ledger implementation details (the latter is the optimistic
 concurrency token), not part of a wallet-shaped API.
+
+### `GET /wallets` — list every wallet
+
+```bash
+curl localhost:8081/wallets
+```
+
+Response `200 OK`:
+
+```json
+[
+  {
+    "id": "5b2e...",
+    "name": "Alice's Wallet",
+    "currency": "USD",
+    "balance": 1500,
+    "created_at": "2026-09-08T09:00:00Z",
+    "updated_at": "2026-09-08T09:00:03Z"
+  }
+]
+```
+
+A passthrough to ledger-service's `GET /accounts`, which already excludes
+system accounts like the external funding source (see its README) — so
+every entry here is a real, selectable wallet. `[]` (never `null`) when
+none exist yet. Same convention as `POST /wallets` above: `account_type`
+and `version` are omitted, since they're ledger implementation details,
+not part of a wallet-shaped API.
 
 ### `POST /wallets/{id}/topup` — fund a wallet
 
@@ -222,6 +264,30 @@ Passes straight through to ledger-service's
 `GET /accounts/{id}/history`, including its documented behavior: an
 existing-but-empty wallet returns `200` with `"entries": []`, a
 nonexistent one returns `404`.
+
+### `GET /integrity` — every account's drift check
+
+```bash
+curl localhost:8081/integrity
+```
+
+```json
+{
+  "results": [
+    { "account_id": "...", "cached_balance": 1500, "computed_balance": 1500, "drifted": false }
+  ],
+  "drifted": false
+}
+```
+
+The one endpoint in this service that isn't wallet-shaped: a direct
+passthrough of ledger-service's `GET /integrity` (see its README),
+field names included (`account_id`, not `wallet_id` — `results` can
+include ledger-internal accounts, like the external funding account,
+that aren't wallets). It exists here purely so the demo frontend never
+needs to treat ledger-service as a third origin alongside
+wallet-service and notification-service — see the root README's
+"Frontend" section.
 
 ### Error responses
 

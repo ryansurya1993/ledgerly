@@ -29,6 +29,16 @@ type Config struct {
 	// response is kept in Redis -- see internal/idempotency's package
 	// doc for why letting it expire is safe.
 	IdempotencyTTL time.Duration
+
+	// FrontendDir is where the static demo frontend's files live --
+	// see cmd/wallet-service/main.go. Defaults to "../frontend", which
+	// resolves correctly when running `go run ./cmd/wallet-service`
+	// from this module's root (the normal way every README in this
+	// repo documents running a service); the Docker image sets this
+	// explicitly, since the frontend is bind-mounted into the
+	// container at a fixed path rather than baked into the image (see
+	// the root docker-compose.yml).
+	FrontendDir string
 }
 
 // Load reads Config from the environment.
@@ -47,6 +57,7 @@ func Load() (Config, error) {
 		LedgerServiceURL: getenv("LEDGER_SERVICE_URL", "http://localhost:8080"),
 		RedisAddr:        getenv("WALLET_REDIS_ADDR", "localhost:6379"),
 		RedisPassword:    os.Getenv("WALLET_REDIS_PASSWORD"),
+		FrontendDir:      getenv("FRONTEND_DIR", "../frontend"),
 	}
 
 	redisDB, err := strconv.Atoi(getenv("WALLET_REDIS_DB", "0"))

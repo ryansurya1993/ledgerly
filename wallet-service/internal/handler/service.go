@@ -20,6 +20,8 @@ type LedgerClient interface {
 	PostTransaction(ctx context.Context, req ledgerclient.PostTransactionRequest) (ledgerclient.PostTransactionResponse, error)
 	GetBalance(ctx context.Context, accountID string) (ledgerclient.Balance, error)
 	GetHistory(ctx context.Context, accountID string) (ledgerclient.History, error)
+	GetIntegrity(ctx context.Context) (ledgerclient.IntegrityResponse, error)
+	ListAccounts(ctx context.Context) ([]ledgerclient.Account, error)
 }
 
 // IdempotencyStore is what the topup/transfer handlers need from the

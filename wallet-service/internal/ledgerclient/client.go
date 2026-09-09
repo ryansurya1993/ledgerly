@@ -66,6 +66,24 @@ func (c *Client) GetHistory(ctx context.Context, accountID string) (History, err
 	return history, err
 }
 
+// GetIntegrity calls ledger-service's GET /integrity -- every
+// account's drift check, not just one wallet's.
+func (c *Client) GetIntegrity(ctx context.Context) (IntegrityResponse, error) {
+	var integrity IntegrityResponse
+	err := c.do(ctx, http.MethodGet, "/integrity", nil, &integrity)
+	return integrity, err
+}
+
+// ListAccounts calls ledger-service's GET /accounts -- every wallet
+// account (ledger-service already excludes system accounts like the
+// external funding account; see its Ledger.ListWalletAccounts doc
+// comment), not just one.
+func (c *Client) ListAccounts(ctx context.Context) ([]Account, error) {
+	var accounts []Account
+	err := c.do(ctx, http.MethodGet, "/accounts", nil, &accounts)
+	return accounts, err
+}
+
 // do performs one HTTP round trip against ledger-service: marshals
 // reqBody (if any) as the request body, and on a 2xx response unmarshals
 // the response body into respBody (if non-nil). A non-2xx response is

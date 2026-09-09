@@ -16,6 +16,8 @@ type fakeLedgerClient struct {
 	postTransactionFunc func(ctx context.Context, req ledgerclient.PostTransactionRequest) (ledgerclient.PostTransactionResponse, error)
 	getBalanceFunc      func(ctx context.Context, accountID string) (ledgerclient.Balance, error)
 	getHistoryFunc      func(ctx context.Context, accountID string) (ledgerclient.History, error)
+	getIntegrityFunc    func(ctx context.Context) (ledgerclient.IntegrityResponse, error)
+	listAccountsFunc    func(ctx context.Context) ([]ledgerclient.Account, error)
 }
 
 func (f *fakeLedgerClient) CreateAccount(ctx context.Context, req ledgerclient.CreateAccountRequest) (ledgerclient.Account, error) {
@@ -32,6 +34,14 @@ func (f *fakeLedgerClient) GetBalance(ctx context.Context, accountID string) (le
 
 func (f *fakeLedgerClient) GetHistory(ctx context.Context, accountID string) (ledgerclient.History, error) {
 	return f.getHistoryFunc(ctx, accountID)
+}
+
+func (f *fakeLedgerClient) GetIntegrity(ctx context.Context) (ledgerclient.IntegrityResponse, error) {
+	return f.getIntegrityFunc(ctx)
+}
+
+func (f *fakeLedgerClient) ListAccounts(ctx context.Context) ([]ledgerclient.Account, error) {
+	return f.listAccountsFunc(ctx)
 }
 
 // fakeIdempotencyStore is an in-memory, scriptable IdempotencyStore for

@@ -120,3 +120,22 @@ type History struct {
 	AccountID string         `json:"account_id"`
 	Entries   []HistoryEntry `json:"entries"`
 }
+
+// IntegrityResult is one account's drift check, as returned by
+// ledger-service's GET /integrity. AccountID deliberately isn't
+// renamed to "wallet_id" the way Balance/History's fields are
+// elsewhere in this package: results here can include ledger-internal
+// accounts (e.g. the external funding account) that aren't wallets at
+// all, so "account" is the accurate term.
+type IntegrityResult struct {
+	AccountID       string `json:"account_id"`
+	CachedBalance   int64  `json:"cached_balance"`
+	ComputedBalance int64  `json:"computed_balance"`
+	Drifted         bool   `json:"drifted"`
+}
+
+// IntegrityResponse is ledger-service's response to GET /integrity.
+type IntegrityResponse struct {
+	Results []IntegrityResult `json:"results"`
+	Drifted bool              `json:"drifted"`
+}
