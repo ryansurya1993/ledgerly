@@ -442,3 +442,44 @@ func TestCheckAllAccountsIntegrity(t *testing.T) {
 		}
 	}
 }
+
+func TestListWalletAccounts(t *testing.T) {
+	l := newTestLedger(t)
+	ctx := context.Background()
+
+	a := mustCreateWallet(t, l, "TestListWalletAccounts")
+
+	accounts, err := l.ListWalletAccounts(ctx)
+	if err != nil {
+		t.Fatalf("ListWalletAccounts: %v", err)
+	}
+
+	var found bool
+	for _, got := range accounts {
+		// The migration-seeded external funding account is a system
+		// account, not a wallet -- it must never appear in this list (see
+		// ListWalletAccounts's doc comment for why). Every test in this
+		// package shares one Postgres instance across the whole run, so
+		// this also guards against a regression that silently drops the
+		// account_type filter and starts returning every account ever
+		// created by any other test, not just wallets.
+		if got.AccountType != AccountTypeWallet {
+			t.Fatalf("ListWalletAccounts returned a non-wallet account: %+v", got)
+		}
+		if got.ID == ExternalFundingAccountID {
+			t.Fatalf("ListWalletAccounts returned the external funding account")
+		}
+		if got.ID == a.ID {
+			found = true
+			if got.Name != a.Name {
+				t.Errorf("Name = %q, want %q", got.Name, a.Name)
+			}
+			if got.Currency != a.Currency {
+				t.Errorf("Currency = %q, want %q", got.Currency, a.Currency)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("ListWalletAccounts did not include the wallet just created (%s)", a.ID)
+	}
+}

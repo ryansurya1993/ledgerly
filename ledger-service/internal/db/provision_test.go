@@ -26,8 +26,10 @@ func TestProvisionAppRolePassword_BeforeMigrationsFails(t *testing.T) {
 	defer stop()
 
 	cfg := Config{
-		Host:            pg.Host,
-		Port:            pg.Port,
+		AppHost:         pg.Host,
+		AppPort:         pg.Port,
+		MigrateHost:     pg.Host,
+		MigratePort:     pg.Port,
 		Name:            pg.DBName,
 		SSLMode:         "disable",
 		AppUser:         "ledger_app",

@@ -64,29 +64,103 @@ as safe to run on the 100th startup as the first.
 
 ### Environment variables
 
-Host, port, database name, and SSL mode are shared by both roles; only
-the credentials differ. All are read by `internal/db.LoadConfig()`.
+Database name and SSL mode are shared by both roles; host, port, and
+credentials can all differ. All are read by `internal/db.LoadConfig()`.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LEDGER_DB_HOST` | `localhost` | |
+| `LEDGER_DB_HOST` | `localhost` | Where the runtime pool (`AppDSN`) connects. In docker-compose, this is PgBouncer, not Postgres directly — see "PgBouncer" below. |
 | `LEDGER_DB_PORT` | `5432` | |
 | `LEDGER_DB_NAME` | `ledgerly` | |
 | `LEDGER_DB_SSLMODE` | `disable` | set to `require` (or stricter) in production |
 | `LEDGER_APP_DB_USER` | `ledger_app` | the restricted runtime role |
 | `LEDGER_APP_DB_PASSWORD` | *(required, no default)* | the service sets this as `ledger_app`'s Postgres password on every startup — see "First-time setup" |
+| `LEDGER_MIGRATE_DB_HOST` | same as `LEDGER_DB_HOST` | Where migrations (`MigrateURL`) connect -- **always Postgres directly, never PgBouncer**, regardless of what `LEDGER_DB_HOST` is set to. See "PgBouncer" below for why this can't share `LEDGER_DB_HOST`'s value once PgBouncer is in the picture. |
+| `LEDGER_MIGRATE_DB_PORT` | same as `LEDGER_DB_PORT` | |
 | `LEDGER_MIGRATE_DB_USER` | `postgres` | the admin/owner role used only for migrations |
 | `LEDGER_MIGRATE_DB_PASSWORD` | *(required, no default)* | |
 
 Startup fails immediately with a clear error if either password is
 missing, rather than attempting to connect with an empty credential.
+The two host/port pairs defaulting to each other's values means a
+single-Postgres setup with no PgBouncer (the default above) needs zero
+extra configuration; only an environment that actually adds PgBouncer
+needs to point `LEDGER_MIGRATE_DB_HOST`/`PORT` at Postgres directly
+while `LEDGER_DB_HOST`/`PORT` point at PgBouncer instead.
+
+## PgBouncer
+
+`docker-compose.yml` puts [PgBouncer](https://www.pgbouncer.org/) in
+front of Postgres, in **transaction pooling** mode, and points
+`LEDGER_DB_HOST`/`LEDGER_DB_PORT` (i.e. `AppDSN`, the runtime pool
+every request handler queries through) at it instead of at Postgres
+directly. This is what actually makes running multiple `ledger-service`
+replicas (`docker-compose up --scale ledger-service=3`, see the root
+README's "Prove it scales yourself") safe on Postgres's connection
+budget: each replica already runs its own client-side pool
+(`*pgxpool.Pool`), so N replicas × M pool connections each would open
+N×M real Postgres backend connections without PgBouncer in between --
+transaction pooling lets PgBouncer multiplex all of that down to a
+small, fixed number of actual Postgres connections, handing one out per
+transaction rather than per client connection.
+
+Two things had to change to make this safe, both non-obvious enough to
+be worth calling out explicitly (each is also documented at its own
+call site):
+
+- **Migrations bypass PgBouncer entirely** (`LEDGER_MIGRATE_DB_HOST`/
+  `PORT`, above) -- see `MigrateURL`'s doc comment in
+  `internal/db/config.go`. golang-migrate serializes concurrent
+  migration attempts from multiple simultaneously-starting replicas
+  using a Postgres advisory lock, which is scoped to one *session*.
+  Transaction pooling can hand a session's next transaction to a
+  *different* backend connection than the one holding the lock,
+  silently breaking that serialization -- two replicas could then race
+  to apply the same migration concurrently. `internal/db.ProvisionAppRolePassword`'s
+  admin connection bypasses PgBouncer for the same reason.
+- **The runtime pool forces `pgx.QueryExecModeExec`** -- see
+  `Connect`'s doc comment in `internal/db/pool.go`. pgx's default query
+  mode caches server-side prepared statements per connection, assuming
+  the same backend connection will still have them next time; under
+  transaction pooling, PgBouncer can hand the pool's next transaction
+  to a backend that never saw that `PREPARE`, which surfaces as
+  "prepared statement does not exist" errors under concurrent load.
+  `QueryExecModeExec` never names or reuses a statement across round
+  trips, so it works identically whether `AppDSN` points at PgBouncer
+  or straight at Postgres.
+
+Local dev without `docker-compose` (e.g. `go run ./cmd/ledger-service`
+against your own Postgres) is unaffected either way: PgBouncer is
+opt-in infrastructure this service degrades to not having, not a hard
+dependency -- point `LEDGER_DB_HOST` at Postgres directly and both of
+the above remain correct (harmless) no-ops.
+
+### How PgBouncer itself is configured
+
+The `pgbouncer/pgbouncer` image takes no config file -- its entrypoint
+generates `/etc/pgbouncer/pgbouncer.ini` itself from `DATABASES_*`/
+`PGBOUNCER_*` environment variables on every start (confirmed by
+extracting and reading that entrypoint script directly from the pulled
+image, not assumed from documentation). `docker-compose.yml` sets
+`DATABASES_HOST`/`PORT`/`DBNAME`/`USER`/`PASSWORD` to `ledger_app`'s
+own credentials and leaves the client-facing database name as the
+image's default wildcard (`*`), so any dbname a client requests proxies
+to that one upstream. `PGBOUNCER_AUTH_TYPE=any` means PgBouncer
+performs no authentication of its own on incoming connections and
+always authenticates upstream using those same `DATABASES_USER`/
+`PASSWORD` credentials regardless of what a client presents -- a
+deliberate local-dev simplification, safe here since PgBouncer is never
+published to the host and only `ledger-service`, on the internal
+Compose network, ever talks to it. See `docker-compose.yml`'s own
+comment on the `pgbouncer` service for the full reasoning.
 
 ### How the two roles stay separate in code, not just in the database
 
 `internal/db.Config` exposes exactly two ways to turn its fields into a
 connection string: `AppDSN()` and `MigrateURL()`. There is no path that
-lets code build a string mixing the admin user with the app password or
-vice versa — each method only ever reads its own pair of fields.
+lets code build a string mixing the admin user (or its direct-to-Postgres
+host/port) with the app password (or its possibly-PgBouncer host/port)
+or vice versa — each method only ever reads its own set of fields.
 
 - `internal/db/migrate.go`'s `RunMigrations` is the *only* caller of
   `MigrateURL()`. It opens a connection, applies pending `.sql` files
@@ -155,6 +229,45 @@ Response `201 Created`:
   "updated_at": "2026-09-08T09:00:00Z"
 }
 ```
+
+### `GET /accounts` — list every wallet account
+
+```bash
+curl localhost:8080/accounts
+```
+
+Response `200 OK`:
+
+```json
+[
+  {
+    "id": "5b2e...",
+    "name": "Alice's Wallet",
+    "account_type": "wallet",
+    "currency": "USD",
+    "balance": 1500,
+    "version": 2,
+    "created_at": "2026-09-08T09:00:00Z",
+    "updated_at": "2026-09-08T09:00:03Z"
+  }
+]
+```
+
+Oldest-created first; `[]` (never `null`) when there are none yet. This
+unconditionally filters to `account_type = "wallet"` — system accounts
+(currently just the seeded external funding account) are always
+excluded, with no query parameter to opt back in. Nothing that creates
+an account through this API (`POST /accounts` here, or wallet-service's
+`POST /wallets`) ever produces a `"wallet"` account a real user
+shouldn't see, but the reverse isn't true: the external funding account
+exists purely to make top-ups balance under double-entry accounting
+(see `ExternalFundingAccountID`'s doc comment in
+`internal/ledger/types.go`), nothing ever treats it as a wallet, and
+listing it here would just confuse a caller into thinking it's a real,
+selectable wallet. A caller that genuinely needs every account
+regardless of type already has `GET /integrity` below for that; no
+current caller needs an unfiltered or system-only listing, so this
+endpoint doesn't grow a parameter for a distinction nothing yet uses.
 
 ### `GET /accounts/{id}/balance` — current balance
 

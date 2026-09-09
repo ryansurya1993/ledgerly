@@ -59,6 +59,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handler.Health(pool))
 	mux.HandleFunc("POST /accounts", handler.CreateAccount(ledgerSvc))
+	mux.HandleFunc("GET /accounts", handler.ListAccounts(ledgerSvc))
 	mux.HandleFunc("GET /accounts/{id}/balance", handler.GetBalance(ledgerSvc))
 	mux.HandleFunc("GET /accounts/{id}/history", handler.GetHistory(ledgerSvc))
 	mux.HandleFunc("GET /accounts/{id}/integrity", handler.GetAccountIntegrity(ledgerSvc))

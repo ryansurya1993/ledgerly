@@ -159,3 +159,44 @@ func (l *Ledger) GetHistory(ctx context.Context, accountID uuid.UUID) ([]History
 	}
 	return history, nil
 }
+
+// ListWalletAccounts returns every wallet account (accounts.account_type
+// = 'wallet'), oldest first. System accounts -- currently just
+// ExternalFundingAccountID -- are deliberately excluded: every wallet
+// account is a real thing a visitor should be able to see and pick (to
+// top up or to transfer to), but the external funding account exists on
+// the ledger purely to make top-ups balance under double-entry
+// accounting, nothing ever creates one as a "wallet" (see CreateAccount
+// and wallet-service's Transfer/CreateWallet handlers), and showing it
+// in a wallet list would just confuse a visitor into thinking it's
+// theirs to select. Callers that do need every account regardless of
+// type -- e.g. GetAllIntegrity in internal/handler, checking the whole
+// ledger reconciles -- already have their own query for that; this one
+// is specifically the "what wallets exist" list.
+func (l *Ledger) ListWalletAccounts(ctx context.Context) ([]Account, error) {
+	rows, err := l.db.Query(ctx, `
+		SELECT id, name, account_type, currency, balance, version, created_at, updated_at
+		FROM accounts
+		WHERE account_type = $1
+		ORDER BY created_at ASC
+	`, string(AccountTypeWallet))
+	if err != nil {
+		return nil, fmt.Errorf("query wallet accounts: %w", err)
+	}
+	defer rows.Close()
+
+	accounts := make([]Account, 0)
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(
+			&a.ID, &a.Name, &a.AccountType, &a.Currency, &a.Balance, &a.Version, &a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan account: %w", err)
+		}
+		accounts = append(accounts, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read account rows: %w", err)
+	}
+	return accounts, nil
+}

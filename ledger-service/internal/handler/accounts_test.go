@@ -88,6 +88,81 @@ func TestCreateAccount_InvalidParamsMapsTo400(t *testing.T) {
 	}
 }
 
+func TestListAccounts_Success(t *testing.T) {
+	now := time.Now().UTC()
+	id1, id2 := uuid.New(), uuid.New()
+
+	svc := &fakeLedgerService{
+		listWalletAccountsFunc: func(ctx context.Context) ([]ledger.Account, error) {
+			return []ledger.Account{
+				{ID: id1, Name: "Alice", AccountType: ledger.AccountTypeWallet, Currency: "USD", Balance: 500, Version: 1, CreatedAt: now, UpdatedAt: now},
+				{ID: id2, Name: "Bob", AccountType: ledger.AccountTypeWallet, Currency: "USD", Balance: 0, Version: 0, CreatedAt: now, UpdatedAt: now},
+			}, nil
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	w := httptest.NewRecorder()
+
+	ListAccounts(svc)(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	var got []accountResponse
+	decodeJSON(t, w, &got)
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].ID != id1 || got[0].Name != "Alice" || got[0].AccountType != "wallet" {
+		t.Errorf("got[0] = %+v", got[0])
+	}
+	if got[1].ID != id2 || got[1].Name != "Bob" {
+		t.Errorf("got[1] = %+v", got[1])
+	}
+}
+
+func TestListAccounts_EmptyReturnsEmptyArrayNotNull(t *testing.T) {
+	svc := &fakeLedgerService{
+		listWalletAccountsFunc: func(ctx context.Context) ([]ledger.Account, error) {
+			return nil, nil
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	w := httptest.NewRecorder()
+
+	ListAccounts(svc)(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	// A frontend consuming this list shouldn't have to special-case
+	// `null` vs `[]` for "no wallets yet" -- confirm the body is
+	// literally "[]", not the "null" json.Marshal would produce from a
+	// nil slice with no make() in between.
+	if got := w.Body.String(); got != "[]\n" && got != "[]" {
+		t.Errorf("body = %q, want an empty JSON array, not null", got)
+	}
+}
+
+func TestListAccounts_ErrorMapsTo500(t *testing.T) {
+	svc := &fakeLedgerService{
+		listWalletAccountsFunc: func(ctx context.Context) ([]ledger.Account, error) {
+			return nil, context.DeadlineExceeded
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	w := httptest.NewRecorder()
+
+	ListAccounts(svc)(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
 func TestGetBalance_Success(t *testing.T) {
 	accountID := uuid.New()
 	svc := &fakeLedgerService{

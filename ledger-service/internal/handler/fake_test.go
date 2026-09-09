@@ -21,6 +21,7 @@ type fakeLedgerService struct {
 	accountExistsFunc         func(ctx context.Context, accountID uuid.UUID) (bool, error)
 	getBalanceFunc            func(ctx context.Context, accountID uuid.UUID) (int64, error)
 	getHistoryFunc            func(ctx context.Context, accountID uuid.UUID) ([]ledger.HistoryEntry, error)
+	listWalletAccountsFunc    func(ctx context.Context) ([]ledger.Account, error)
 	postTransactionFunc       func(ctx context.Context, p ledger.PostTransactionParams) (ledger.PostTransactionResult, error)
 	checkAccountIntegrityFunc func(ctx context.Context, accountID uuid.UUID) (ledger.IntegrityResult, error)
 	checkAllIntegrityFunc     func(ctx context.Context) ([]ledger.IntegrityResult, error)
@@ -40,6 +41,10 @@ func (f *fakeLedgerService) GetBalance(ctx context.Context, accountID uuid.UUID)
 
 func (f *fakeLedgerService) GetHistory(ctx context.Context, accountID uuid.UUID) ([]ledger.HistoryEntry, error) {
 	return f.getHistoryFunc(ctx, accountID)
+}
+
+func (f *fakeLedgerService) ListWalletAccounts(ctx context.Context) ([]ledger.Account, error) {
+	return f.listWalletAccountsFunc(ctx)
 }
 
 func (f *fakeLedgerService) PostTransaction(ctx context.Context, p ledger.PostTransactionParams) (ledger.PostTransactionResult, error) {

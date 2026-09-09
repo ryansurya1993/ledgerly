@@ -22,6 +22,7 @@ type LedgerService interface {
 	AccountExists(ctx context.Context, accountID uuid.UUID) (bool, error)
 	GetBalance(ctx context.Context, accountID uuid.UUID) (int64, error)
 	GetHistory(ctx context.Context, accountID uuid.UUID) ([]ledger.HistoryEntry, error)
+	ListWalletAccounts(ctx context.Context) ([]ledger.Account, error)
 	PostTransaction(ctx context.Context, p ledger.PostTransactionParams) (ledger.PostTransactionResult, error)
 	CheckAccountIntegrity(ctx context.Context, accountID uuid.UUID) (ledger.IntegrityResult, error)
 	CheckAllAccountsIntegrity(ctx context.Context) ([]ledger.IntegrityResult, error)

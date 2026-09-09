@@ -71,6 +71,30 @@ func CreateAccount(svc LedgerService) http.HandlerFunc {
 	}
 }
 
+// ListAccounts handles GET /accounts, returning every wallet account --
+// see Ledger.ListWalletAccounts for why system accounts (the external
+// funding account) are excluded rather than offered as a filter here.
+// No caller today needs an unfiltered or system-only listing (GET
+// /integrity already serves "every account, including system ones," for
+// the reconciliation use case), so this endpoint doesn't grow a query
+// parameter for a distinction nothing yet uses.
+func ListAccounts(svc LedgerService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		accounts, err := svc.ListWalletAccounts(r.Context())
+		if err != nil {
+			writeLedgerError(w, err)
+			return
+		}
+
+		resp := make([]accountResponse, len(accounts))
+		for i, a := range accounts {
+			resp[i] = newAccountResponse(a)
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
 // parseAccountID extracts and parses the {id} path value shared by
 // every /accounts/{id}/... route. On a malformed value it writes a 400
 // response itself and returns ok=false, so callers can just

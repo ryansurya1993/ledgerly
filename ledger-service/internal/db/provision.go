@@ -40,7 +40,9 @@ var ErrAppRoleNotYetCreated = errors.New("app role does not exist yet -- migrati
 // .sql file. ALTER ROLE ... WITH PASSWORD is idempotent, so running it
 // on every startup (not just the very first) is safe and cheap.
 func ProvisionAppRolePassword(ctx context.Context, cfg Config) error {
-	conn, err := pgx.Connect(ctx, cfg.dsn("postgres", cfg.MigrateUser, cfg.MigratePassword))
+	// Direct to Postgres, like MigrateURL and for the same reason
+	// (never through PgBouncer) -- see MigrateURL's doc comment.
+	conn, err := pgx.Connect(ctx, cfg.dsn("postgres", cfg.MigrateHost, cfg.MigratePort, cfg.MigrateUser, cfg.MigratePassword))
 	if err != nil {
 		return fmt.Errorf("connect as admin role: %w", err)
 	}

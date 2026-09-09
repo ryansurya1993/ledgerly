@@ -74,8 +74,12 @@ func startTestPostgres(ctx context.Context) (*pgxpool.Pool, func(), error) {
 	}
 
 	cfg := ledgerdb.Config{
-		Host:            pg.Host,
-		Port:            pg.Port,
+		// No PgBouncer in tests -- App and Migrate point at the same
+		// container.
+		AppHost:         pg.Host,
+		AppPort:         pg.Port,
+		MigrateHost:     pg.Host,
+		MigratePort:     pg.Port,
 		Name:            pg.DBName,
 		SSLMode:         "disable",
 		AppUser:         "ledger_app",
